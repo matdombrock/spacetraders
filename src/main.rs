@@ -15,7 +15,9 @@ mod univ {
 
 mod pos {
     use rand::Rng;
-    #[derive(Debug, Clone)]
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Position {
         pub x: i32,
         pub y: i32,
@@ -43,7 +45,9 @@ mod pos {
 }
 
 mod item_name {
-    #[derive(Hash, Eq, PartialEq, Debug, Clone)]
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Hash, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
     pub enum ItemName {
         MetalLow,
         MetalMid,
@@ -167,9 +171,11 @@ mod item_meta {
 mod inv_store {
     use crate::item_meta::ILM;
     use crate::item_name::{ITEM_NAMES, ItemName};
+    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     // Can be used for stock, price lists, etc.
-    #[derive(Debug, Clone)]
     pub struct InvStore(HashMap<ItemName, i32>);
     impl InvStore {
         pub fn new() -> Self {
@@ -214,8 +220,9 @@ mod cargo_hold {
     use crate::inv_store::InvStore;
     use crate::item_meta::ILM;
     use crate::item_name::ItemName;
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct CargoHold {
         vol_max: i32,
         vol: i32,
@@ -256,8 +263,9 @@ mod cargo_hold {
 
 mod jump_drive {
     use crate::pos;
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct JumpDrive {
         pub fuel_per_ly: i32,
         pub max_range: i32,
@@ -320,8 +328,9 @@ mod entity {
     use crate::cargo_hold::CargoHold;
     use crate::jump_drive::JumpDrive;
     use crate::pos;
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Entity {
         pub name: String,
         pub id: i32,
@@ -367,8 +376,9 @@ mod entity_maker {
 mod entity_list {
     use crate::entity::Entity;
     use crate::entity_maker;
+    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct EntityList {
         entities: Vec<Entity>,
     }
@@ -664,6 +674,10 @@ fn main() {
             "quit" | "exit" | "q" => {
                 cmd_header("Goodbye");
                 println!("Exiting...");
+                // Serialize entities to JSON and save to file
+                let serialized = serde_json::to_string_pretty(&entities).unwrap();
+                println!("Saving entities to entities.json...");
+                std::fs::write("entities.json", serialized).expect("Unable to write file");
                 break;
             }
             _ => {
