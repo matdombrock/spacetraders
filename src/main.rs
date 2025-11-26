@@ -266,6 +266,24 @@ mod jump_drive {
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct JumpRes {
+        pub success: bool,
+        pub message: String,
+        pub distance: i32,
+        pub fuel_used: i32,
+    }
+    impl JumpRes {
+        pub fn new() -> Self {
+            JumpRes {
+                success: false,
+                message: String::new(),
+                distance: 0,
+                fuel_used: 0,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct JumpDrive {
         pub fuel_per_ly: i32,
         pub max_range: i32,
@@ -282,29 +300,33 @@ mod jump_drive {
                 fuel_cur: fuel,
             }
         }
-        pub fn jump(&mut self, from: &pos::Position, to: &pos::Position) -> bool {
+        pub fn jump(&mut self, from: &pos::Position, to: &pos::Position) -> JumpRes {
+            let mut res = JumpRes::new();
             let distance = from.distance(to);
             if distance > self.max_range {
-                println!(
+                res.message = format!(
                     "Jump failed: distance {} exceeds max range {}",
                     distance, self.max_range
                 );
-                return false;
+                return res;
             }
             let fuel_needed = self.calc_fuel(distance);
             if fuel_needed > self.fuel_cur {
-                println!(
+                res.message = format!(
                     "Jump failed: not enough fuel (need {}, have {})",
                     fuel_needed, self.fuel_cur
                 );
-                return false;
+                return res;
             }
             self.consume(fuel_needed);
-            println!(
+            res.message = format!(
                 "Jump successful: traveled {} light years, consumed {} fuel",
                 distance, fuel_needed
             );
-            true
+            res.success = true;
+            res.distance = distance;
+            res.fuel_used = fuel_needed;
+            res
         }
         pub fn print(&self) {
             println!("-------");
@@ -327,6 +349,7 @@ mod jump_drive {
 mod entity {
     use crate::cargo_hold::CargoHold;
     use crate::jump_drive::JumpDrive;
+    use crate::jump_drive::JumpRes;
     use crate::pos;
     use serde::{Deserialize, Serialize};
 
@@ -377,17 +400,22 @@ mod entity {
         pub fn set_pos(&mut self, position: pos::Position) {
             self.pos = position;
         }
-        pub fn jump_to(&mut self, destination: &pos::Position) -> bool {
+        pub fn jump(&mut self, destination: &pos::Position) -> JumpRes {
             // Check if docked
+            let mut res = JumpRes::new();
             if self.docked_to.is_some() {
-                println!("Cannot jump while docked. Undock first.");
-                return false;
+                res.success = false;
+                res.message = "Cannot jump while docked.".to_string();
+                return res;
             }
-            if self.jump_drive.jump(&self.pos, destination) {
+            res = self.jump_drive.jump(&self.pos, destination);
+            if res.success {
                 self.pos = destination.clone();
-                true
+                res.success = true;
+                res
             } else {
-                false
+                res.success = false;
+                res
             }
         }
     }
@@ -519,148 +547,86 @@ mod input {
     }
 }
 
-mod cmds {
+// Actions represent things the player can do
+// They should never print anything
+// Formatting is up to ui functions
+mod actions {
+
+    pub struct ARres {
+        pub success: bool,
+    }
+    pub struct AResMsg {
+        pub success: bool,
+        pub message: String,
+    }
 
     use crate::entity::Entity;
-    pub fn target(ship: &mut Entity, ent_id: i32) {
+    pub fn target(ship: &mut Entity, ent_id: i32) -> ARres {
         ship.target_id = Some(ent_id);
-        println!("Target set to entity ID {}", ent_id);
+        ARres { success: true }
     }
 
-    pub fn scan(ship: &Entity, ent_list: &EntityList) {
-        println!("Name: {}", ship.name);
-        println!("ID  : {}", ship.id);
-        println!("Class: {:?}", ship.class);
-        println!("Targeting: {:?}", ship.target_id);
-        let docked_ent = match ship.docked_to {
-            Some(id) => ent_list.get_by_id(id).map(|e| e.name.clone()),
-            none => None,
-        };
-        if let Some(docked_name) = docked_ent {
-            println!(
-                "Docked to: {} (ID {})",
-                docked_name,
-                ship.docked_to.unwrap()
-            );
-        } else {
-            println!("Docked to: None");
-        }
-        ship.jump_drive.print();
-        ship.pos.print();
+    pub struct AResJumpCheck {
+        pub distance: i32,
+        pub fuel_needed: i32,
+        pub fuel_cur: i32,
+        pub fuel_after: i32,
+        pub can_jump: bool,
     }
-
-    pub fn jump_to(ent_list: &mut EntityList, ent_id: i32) {
-        if let Some(target) = ent_list.get_by_id(ent_id) {
-            // Clone/copy the needed data to end the immutable borrow
-            let target_pos = target.pos.clone();
-            let target_name = target.name.clone();
-
-            let ent = ent_list.get_player_mut().unwrap();
-            if ent.jump_to(&target_pos) {
-                println!("Jumped to {}:", target_name);
-                println!("Fuel remaining: {}g", ent.jump_drive.fuel_cur);
-                ent.pos.print();
-                ent.target_id = Some(ent_id);
-            } else {
-                println!("Jump failed.");
-            }
-        } else {
-            println!("No entity found with ID {}.", ent_id);
+    pub fn jump_check(ent: &Entity, target: &Position) -> AResJumpCheck {
+        let distance = ent.pos.distance(target);
+        let fuel_needed = ent.jump_drive.calc_fuel(distance);
+        let fuel_cur = ent.jump_drive.fuel_cur;
+        let fuel_after = fuel_cur - fuel_needed;
+        let can_jump = distance <= ent.jump_drive.max_range && fuel_needed <= fuel_cur;
+        AResJumpCheck {
+            distance,
+            fuel_needed,
+            fuel_cur,
+            fuel_after,
+            can_jump,
         }
     }
 
+    type AResJump = JumpRes;
+    use crate::jump_drive::JumpRes;
     use crate::pos::Position;
-    pub fn jump_man(ship: &mut Entity, destination: Position) {
-        if ship.jump_to(&destination) {
-            println!("Jumped to ({}, {}):", destination.x, destination.y);
-            println!("Fuel remaining: {}g", ship.jump_drive.fuel_cur);
-            ship.pos.print();
+    pub fn jump(ship: &mut Entity, destination: Position) -> AResJump {
+        let mut res = JumpRes::new();
+        if ship.jump(&destination).success {
+            res.success = true;
+            let distance = ship.pos.distance(&destination);
+            res.fuel_used = ship.jump_drive.calc_fuel(distance);
         } else {
-            println!("Jump failed.");
+            res.success = false;
         }
+        res
     }
 
-    pub fn jump_check(ship: &Entity, ent_list: &EntityList, ent_id: i32) {
-        let ent = ent_list.get_by_id(ent_id);
-        if let Some(target) = ent {
-            let distance = ship.pos.distance(&target.pos);
-            let fuel_needed = ship.jump_drive.calc_fuel(distance);
-            println!("Jump Check to {}:", target.name);
-            println!("Distance: {} ly", distance);
-            println!("Fuel needed: {}g", fuel_needed);
-            println!("Current fuel: {}g", ship.jump_drive.fuel_cur);
-            println!(
-                "Fuel after jump: {}g",
-                ship.jump_drive.fuel_cur - fuel_needed
-            );
-        } else {
-            println!("No entity found with ID {}.", ent_id);
-        }
-    }
-
-    pub fn jump_check_man(ship: &Entity, destination: Position) {
-        let distance = ship.pos.distance(&destination);
-        let fuel_needed = ship.jump_drive.calc_fuel(distance);
-        println!("Jump Check:");
-        println!("Distance: {} ly", distance);
-        println!("Fuel needed: {}g", fuel_needed);
-        println!("Current fuel: {}g", ship.jump_drive.fuel_cur);
-        println!(
-            "Fuel after jump: {}g",
-            ship.jump_drive.fuel_cur - fuel_needed
-        );
-    }
-
-    use crate::entity::EntityClass;
     use crate::entity_list::EntityList;
-    pub fn entities_list(list: &EntityList, ship: &Entity, max_distance: i32) {
-        let mut found = 0;
-        list.list_by_distance(ship.pos, max_distance)
-            .iter()
-            .for_each(|ent| {
-                let class_str = match ent.class {
-                    EntityClass::Station => "STAT",
-                    EntityClass::Craft => "CRFT",
-                };
-                let distance = ship.pos.distance(&ent.pos);
-                println!(
-                    "{:<6}: [{}] {:>5} ly - ({:>5}, {:>5}) - {}",
-                    ent.id, class_str, distance, ent.pos.x, ent.pos.y, ent.name
-                );
-                found += 1;
-            });
-        println!("Found {} entities within {} ly", found, max_distance);
+    pub struct AResEntList {
+        pub entities: Vec<Entity>,
     }
-
-    pub fn cargo_list(ent: &Entity) {
-        ent.hold.print();
-    }
-
-    pub fn dock_list(ship: &Entity, ent_list: &EntityList) {
+    pub fn dock_list(ship: &Entity, ent_list: &EntityList) -> AResEntList {
         let nearby_stations: Vec<&Entity> = ent_list
             .list_by_distance(ship.pos, 1)
             .into_iter()
             .filter(|ent| ent.flags.has_dock)
             .collect();
-        if nearby_stations.is_empty() {
-            println!("No stations nearby to dock with.");
-        } else {
-            println!("Nearby Stations:");
-            for station in nearby_stations {
-                let distance = ship.pos.distance(&station.pos);
-                println!(
-                    "{}: {} [{}] ({} {})",
-                    station.id, station.name, distance, station.pos.x, station.pos.y
-                );
-            }
+        AResEntList {
+            entities: nearby_stations.into_iter().cloned().collect(),
         }
     }
 
-    pub fn dock(ent_list: &mut EntityList, ent_id: i32) {
+    pub fn dock(ent_list: &mut EntityList, ent_id: i32) -> AResMsg {
+        let mut res = AResMsg {
+            success: false,
+            message: String::new(),
+        };
         if let Some(target) = ent_list.get_by_id(ent_id) {
             if !target.flags.has_dock {
-                println!("Entity ID {} does not have docking capabilities.", ent_id);
-                return;
+                res.message = format!("Entity ID {} does not have docking capabilities.", ent_id);
+                return res;
             }
             // Clone/copy the needed data to end the immutable borrow
             let target_pos = target.pos.clone();
@@ -668,58 +634,66 @@ mod cmds {
 
             let ship = ent_list.get_player_mut().unwrap();
             if ship.pos.distance(&target_pos) <= 1 {
-                println!("Docked with {}.", target_name);
+                res.message = format!("Docked with {}.", target_name);
+                res.success = true;
                 ship.docked_to = Some(ent_id);
                 ship.target_id = Some(ent_id);
             } else {
-                println!("Docking failed: not close enough to {}.", target_name);
+                res.message = format!("Docking failed: not close enough to {}.", target_name);
             }
         } else {
-            println!("No entity found with ID {}.", ent_id);
+            res.message = format!("No entity found with ID {}.", ent_id);
         }
+        res
     }
 
-    pub fn undock(ent: &mut Entity) {
+    pub fn undock(ent: &mut Entity) -> AResMsg {
+        let mut res = AResMsg {
+            success: false,
+            message: String::new(),
+        };
         if let Some(docked_id) = ent.docked_to {
-            println!("Undocked from entity ID {}.", docked_id);
+            res.message = format!("Undocked from entity ID {}.", docked_id);
             ent.docked_to = None;
         } else {
-            println!("Not currently docked to any entity.");
+            res.message = format!("Not currently docked to any entity.");
+        }
+        res
+    }
+
+    pub fn name_ent(ent: &mut Entity, new_name: &str) -> AResMsg {
+        ent.name = new_name.to_string();
+        AResMsg {
+            success: true,
+            message: format!("Renamed to {}", ent.name),
         }
     }
 
-    pub fn name_ent(ent: &mut Entity, new_name: &str) {
-        ent.name = new_name.to_string();
-        println!("Renamed to {}", ent.name);
-    }
-
-    pub fn save(entities: &EntityList, filename: &str) {
+    pub fn save(entities: &EntityList, filename: &str) -> AResMsg {
         // Serialize entities to JSON and save to file
         let serialized = serde_json::to_string_pretty(&entities).unwrap();
-        println!("Saving entities to {}...", filename);
         std::fs::write(filename, serialized).expect("Unable to write file");
+        AResMsg {
+            success: true,
+            message: format!("Saved to {}", filename),
+        }
     }
 
-    pub fn load(filename: &str) -> EntityList {
+    pub fn load(entities: &mut EntityList, filename: &str) -> AResMsg {
         // Load entities from JSON file and deserialize
-        println!("Loading entities from {}...", filename);
         let data = std::fs::read_to_string(filename).expect("Unable to read file");
-        let entities: EntityList = serde_json::from_str(&data).unwrap();
-        entities
+        *entities = serde_json::from_str(&data).unwrap();
+        AResMsg {
+            success: true,
+            message: "loaded".to_string(),
+        }
     }
 }
 
-use crate::entity::Entity;
-use crate::entity::EntityClass;
-use crate::entity_list::EntityList;
-use crate::input::prompt;
-use crate::item_name::ItemName;
-use crate::pos::Position;
-use crate::univ::UNIV;
-use std::io::{self, Write};
-
+// CLI functions call actions::
+// Handle IO
 mod cli {
-    use crate::cmds;
+    use crate::actions;
     use crate::entity_list::EntityList;
     use crate::pos::Position;
 
@@ -753,13 +727,15 @@ mod cli {
                 return;
             }
         };
-        cmds::target(ship, ent_id);
+        actions::target(ship, ent_id);
+        println!("Target set to entity ID {}", ent_id);
     }
 
     pub fn scan(cmd: Vec<&str>, entities: &EntityList) {
         cli_header("Scan Report");
+        let mut ent = entities.get_player().unwrap();
         if cmd.len() == 1 {
-            cmds::scan(entities.get_player().unwrap(), &entities);
+            ent = entities.get_player().unwrap();
         } else if cmd.len() == 2 {
             let ent_id: i32 = match cmd[1].parse() {
                 Ok(num) => num,
@@ -768,14 +744,30 @@ mod cli {
                     return;
                 }
             };
-            if let Some(ent) = entities.get_by_id(ent_id) {
-                cmds::scan(ent, &entities);
+            if let Some(_ent) = entities.get_by_id(ent_id) {
+                ent = _ent;
             } else {
                 println!("No entity found with ID {}.", ent_id);
             }
         } else {
             println!("Usage: scan [<entity_id>]");
         }
+
+        println!("Name: {}", ent.name);
+        println!("ID  : {}", ent.id);
+        println!("Class: {:?}", ent.class);
+        println!("Targeting: {:?}", ent.target_id);
+        let docked_ent = match ent.docked_to {
+            Some(id) => entities.get_by_id(id).map(|e| e.name.clone()),
+            none => None,
+        };
+        if let Some(docked_name) = docked_ent {
+            println!("Docked to: {} (ID {})", docked_name, ent.docked_to.unwrap());
+        } else {
+            println!("Docked to: None");
+        }
+        ent.jump_drive.print();
+        ent.pos.print();
     }
 
     pub fn jump(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -791,7 +783,19 @@ mod cli {
                 return;
             }
         };
-        cmds::jump_to(entities, ent_id);
+        let ent_pos = if let Some(target) = entities.get_by_id(ent_id) {
+            target.pos.clone()
+        } else {
+            println!("No entity found with ID {}.", ent_id);
+            return;
+        };
+        let res = actions::jump(entities.get_player_mut().unwrap(), ent_pos);
+        if res.success {
+            println!("Success. Used {} g of fuel", res.fuel_used);
+            println!("Traveled {} ly", res.distance);
+        } else {
+            println!("Jump failed");
+        }
     }
 
     pub fn jump_check(cmd: Vec<&str>, entities: &EntityList) {
@@ -807,7 +811,24 @@ mod cli {
                 return;
             }
         };
-        cmds::jump_check(entities.get_player().unwrap(), &entities, ent_id);
+        let target_pos = if let Some(target) = entities.get_by_id(ent_id) {
+            target.pos.clone()
+        } else {
+            println!("No entity found with ID {}.", ent_id);
+            return;
+        };
+        let ship = entities.get_player().unwrap();
+        let res = actions::jump_check(ship, &target_pos);
+        println!("Jump Check complete.");
+        println!("Distance: {} ly", res.distance);
+        println!("Fuel needed: {}g", res.fuel_needed);
+        println!("Current fuel: {}g", res.fuel_cur);
+        println!("Fuel after jump: {}g", res.fuel_after);
+        if res.can_jump {
+            println!("Jump is possible.");
+        } else {
+            println!("Jump is NOT possible.");
+        }
     }
 
     pub fn jump_man(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -831,7 +852,7 @@ mod cli {
             }
         };
         let destination = Position::new(x, y);
-        cmds::jump_man(entities.get_player_mut().unwrap(), destination);
+        actions::jump(entities.get_player_mut().unwrap(), destination);
     }
 
     pub fn jump_check_man(cmd: Vec<&str>, entities: &EntityList) {
@@ -855,7 +876,7 @@ mod cli {
             }
         };
         let destination = Position::new(x, y);
-        cmds::jump_check_man(entities.get_player().unwrap(), destination);
+        actions::jump_check(entities.get_player().unwrap(), &destination);
     }
 
     pub fn jump_rel(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -880,7 +901,7 @@ mod cli {
         };
         let ship = entities.get_player_mut().unwrap();
         let destination = Position::new(ship.pos.x + dx, ship.pos.y + dy);
-        cmds::jump_man(ship, destination);
+        actions::jump(ship, destination);
     }
 
     pub fn jump_check_rel(cmd: Vec<&str>, entities: &EntityList) {
@@ -905,14 +926,16 @@ mod cli {
         };
         let ship = entities.get_player().unwrap();
         let destination = Position::new(ship.pos.x + dx, ship.pos.y + dy);
-        cmds::jump_check_man(ship, destination);
+        actions::jump_check(ship, &destination);
     }
 
     pub fn cargo(cmd: Vec<&str>, entities: &EntityList) {
         cli_header("Cargo Hold");
-        cmds::cargo_list(entities.get_player().unwrap());
+        let ent = entities.get_player().unwrap();
+        ent.hold.print();
     }
 
+    use crate::entity::EntityClass;
     pub fn entities(cmd: Vec<&str>, entities: &EntityList) {
         cli_header("Entities List");
         let max_distance: i32;
@@ -927,12 +950,29 @@ mod cli {
                 }
             };
         }
-        cmds::entities_list(&entities, entities.get_player().unwrap(), max_distance);
+        let mut found = 0;
+        let ent = entities.get_player().unwrap();
+        entities
+            .list_by_distance(ent.pos, max_distance)
+            .iter()
+            .for_each(|ent| {
+                let class_str = match ent.class {
+                    EntityClass::Station => "STAT",
+                    EntityClass::Craft => "CRFT",
+                };
+                let distance = ent.pos.distance(&ent.pos);
+                println!(
+                    "{:<6}: [{}] {:>5} ly - ({:>5}, {:>5}) - {}",
+                    ent.id, class_str, distance, ent.pos.x, ent.pos.y, ent.name
+                );
+                found += 1;
+            });
+        println!("Found {} entities within {} ly", found, max_distance);
     }
 
     pub fn dock_list(cmd: Vec<&str>, entities: &EntityList) {
         cli_header("Dock List");
-        cmds::dock_list(entities.get_player().unwrap(), &entities);
+        actions::dock_list(entities.get_player().unwrap(), &entities);
     }
 
     pub fn dock(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -948,12 +988,12 @@ mod cli {
                 return;
             }
         };
-        cmds::dock(entities, ent_id);
+        actions::dock(entities, ent_id);
     }
 
     pub fn undock(cmd: Vec<&str>, entities: &mut EntityList) {
         cli_header("Undocking");
-        cmds::undock(entities.get_player_mut().unwrap());
+        actions::undock(entities.get_player_mut().unwrap());
     }
 
     pub fn name(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -963,7 +1003,7 @@ mod cli {
             return;
         }
         let new_name = cmd[1..].join(" ");
-        cmds::name_ent(entities.get_player_mut().unwrap(), &new_name);
+        actions::name_ent(entities.get_player_mut().unwrap(), &new_name);
     }
 
     pub fn save(cmd: Vec<&str>, entities: &EntityList) {
@@ -973,7 +1013,7 @@ mod cli {
         } else {
             cmd[1]
         };
-        cmds::save(&entities, filename);
+        actions::save(&entities, filename);
     }
 
     pub fn load(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -983,12 +1023,6 @@ mod cli {
         } else {
             cmd[1]
         };
-        *entities = cmds::load(filename);
-        if let Some(ship) = entities.get_by_id_mut(0) {
-            // my_ship = ship;
-        } else {
-            println!("Warning: No ship found in loaded data.");
-        }
     }
 
     pub fn quit(cmd: Vec<&str>) {
@@ -1001,6 +1035,15 @@ mod cli {
         println!("Unknown command: {}", cmd[0]);
     }
 }
+
+use crate::entity::Entity;
+use crate::entity::EntityClass;
+use crate::entity_list::EntityList;
+use crate::input::prompt;
+use crate::item_name::ItemName;
+use crate::pos::Position;
+use crate::univ::UNIV;
+use std::io::{self, Write};
 
 fn main() {
     // Load names from file (names.txt)
@@ -1049,7 +1092,6 @@ fn main() {
             "target" | "t" => {
                 cli::target(cmd, &mut entities);
             }
-            // TODO: Update scan to allow scanning other entities
             "scan" | "s" => {
                 cli::scan(cmd, &entities);
             }
