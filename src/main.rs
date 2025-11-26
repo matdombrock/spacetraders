@@ -1,6 +1,14 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
+mod ch {
+    pub static ARL: &str = "⮜";
+    pub static ARR: &str = "⮞";
+    pub static ARU: &str = "⮝";
+    pub static ARD: &str = "⮟";
+    pub static SP1: &str = "⏣";
+}
+
 // Universal constants
 mod univ {
     pub struct Univ {
@@ -82,6 +90,8 @@ mod item_meta {
     pub struct ItemMeta {
         pub fname: String,
         pub vol_pc: i32,
+        pub base_val: i32,
+        pub rarity: i32, // 1-100
     }
 
     use std::collections::HashMap;
@@ -94,6 +104,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Metal (low grade)".to_string(),
                     vol_pc: 10,
+                    base_val: 10,
+                    rarity: 1,
                 },
             );
             map.insert(
@@ -101,6 +113,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Metals (mid grade)".to_string(),
                     vol_pc: 20,
+                    base_val: 20,
+                    rarity: 2,
                 },
             );
             map.insert(
@@ -108,6 +122,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Metals (high grade)".to_string(),
                     vol_pc: 30,
+                    base_val: 30,
+                    rarity: 3,
                 },
             );
             map.insert(
@@ -115,6 +131,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Composites (low grade)".to_string(),
                     vol_pc: 15,
+                    base_val: 25,
+                    rarity: 10,
                 },
             );
             map.insert(
@@ -122,6 +140,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Composites (mid grade)".to_string(),
                     vol_pc: 25,
+                    base_val: 35,
+                    rarity: 20,
                 },
             );
             map.insert(
@@ -129,6 +149,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Composites (high grade)".to_string(),
                     vol_pc: 35,
+                    base_val: 45,
+                    rarity: 30,
                 },
             );
             map.insert(
@@ -136,6 +158,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Polymers (low grade)".to_string(),
                     vol_pc: 12,
+                    base_val: 20,
+                    rarity: 10,
                 },
             );
             map.insert(
@@ -143,6 +167,8 @@ mod item_meta {
                 ItemMeta {
                     fname: "Polymers (mid grade)".to_string(),
                     vol_pc: 22,
+                    base_val: 30,
+                    rarity: 20,
                 },
             );
             map.insert(
@@ -150,12 +176,22 @@ mod item_meta {
                 ItemMeta {
                     fname: "Polymers (high grade)".to_string(),
                     vol_pc: 32,
+                    base_val: 40,
+                    rarity: 30,
                 },
             );
             InvListMeta(map)
         }
-        pub fn get(&self, item: &ItemName) -> Option<&ItemMeta> {
+        pub fn get_by_enum(&self, item: &ItemName) -> Option<&ItemMeta> {
             self.0.get(item)
+        }
+        pub fn get_by_str(&self, item_str: &str) -> Option<&ItemMeta> {
+            for (item_enum, meta) in self.0.iter() {
+                if format!("{:?}", item_enum).to_lowercase() == item_str.to_lowercase() {
+                    return Some(meta);
+                }
+            }
+            None
         }
     }
 
@@ -164,7 +200,6 @@ mod item_meta {
 }
 
 mod inv_store {
-    use crate::item_meta::ILM;
     use crate::item_name::{ITEM_NAMES, ItemName};
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
@@ -196,18 +231,6 @@ mod inv_store {
         pub fn items(&self) -> Vec<(&ItemName, &i32)> {
             self.0.iter().collect()
         }
-        pub fn print(&self) {
-            // Sort alphabetically by fname
-            let mut items: Vec<(&ItemName, &i32)> = self.items();
-            items.sort_by_key(|(item, _)| {
-                let meta = ILM.get(item).unwrap();
-                meta.fname.clone()
-            });
-            for (item, qty) in items {
-                let meta = ILM.get(item).unwrap();
-                println!("{:<24}: {}", meta.fname, qty);
-            }
-        }
     }
 }
 
@@ -219,9 +242,9 @@ mod cargo_hold {
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct CargoHold {
-        vol_max: i32,
-        vol: i32,
-        inv: InvStore,
+        pub vol_max: i32,
+        pub vol: i32,
+        pub inv: InvStore,
     }
     impl CargoHold {
         pub fn new(vol_max: i32) -> Self {
@@ -239,15 +262,10 @@ mod cargo_hold {
             self.inv.modify(item, -quantity);
             self.calc_vol();
         }
-        pub fn print(&self) {
-            println!("Cargo Hold: {}/{}", self.vol, self.vol_max);
-            println!("-------");
-            self.inv.print();
-        }
         fn calc_vol(&mut self) {
             let mut total_vol = 0;
             for (item, qty) in self.inv.items() {
-                if let Some(meta) = ILM.get(item) {
+                if let Some(meta) = ILM.get_by_enum(item) {
                     total_vol += meta.vol_pc * (*qty);
                 }
             }
@@ -354,6 +372,7 @@ mod jump_drive {
 
 mod entity {
     use crate::cargo_hold::CargoHold;
+    use crate::inv_store::InvStore;
     use crate::jump_drive::JumpDrive;
     use crate::jump_drive::JumpRes;
     use crate::pos;
@@ -369,6 +388,22 @@ mod entity {
         }
     }
 
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct EntityFinance {
+        pub credits: i32,
+        pub prices: InvStore,
+        pub profit_margin: i32, // Percentage
+    }
+    impl EntityFinance {
+        pub fn new() -> Self {
+            EntityFinance {
+                credits: 10000,
+                prices: InvStore::new(),
+                profit_margin: 20,
+            }
+        }
+    }
+
     #[derive(Hash, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
     pub enum EntityClass {
         Station,
@@ -381,9 +416,9 @@ mod entity {
     pub struct Entity {
         pub name: String,
         pub id: i32,
-        pub credits: i32,
         pub class: EntityClass,
         pub pos: pos::Position,
+        pub fin: EntityFinance,
         pub hold: CargoHold,
         pub jump_drive: JumpDrive,
         pub flags: EntityFlags,
@@ -395,9 +430,9 @@ mod entity {
             Entity {
                 name: name.to_string(),
                 id: 0, // Set my list.add
-                credits: 1000,
                 class: EntityClass::Craft,
                 pos: pos::Position::new(0, 0),
+                fin: EntityFinance::new(),
                 hold: CargoHold::new(1000),
                 jump_drive: JumpDrive::new(10, 100),
                 flags: EntityFlags::new(),
@@ -432,6 +467,8 @@ mod entity {
 mod entity_maker {
     use crate::entity::Entity;
     use crate::entity::EntityClass;
+    use crate::inv_store::InvStore;
+    use crate::item_meta::ILM;
     use crate::pos::Position;
     use crate::univ::UNIV;
     use rand::Rng;
@@ -446,7 +483,21 @@ mod entity_maker {
                 station_names[index1], station_names[index2], station_names[index3]
             )
         }
+        fn random_prices() -> InvStore {
+            let mut rng = rand::rng();
+            // We need a mutable and immutable InvStore
+            let list = InvStore::new();
+            let mut prices = InvStore::new();
+            for (item, qty) in list.items() {
+                if let Some(meta) = ILM.get_by_enum(item) {
+                    let price = meta.base_val + rng.random_range(-5..15);
+                    prices.set(item.clone(), price);
+                }
+            }
+            prices
+        }
         let mut ent = Entity::new(random_name(name_list).as_str());
+        ent.fin.prices = random_prices();
         ent.class = EntityClass::Station;
         ent.flags.has_dock = true;
         ent.set_pos(Position::random(UNIV.gal_size));
@@ -533,6 +584,7 @@ mod entity_list {
 }
 
 mod input {
+    use crate::ch;
     use colored::*;
     use rustyline::Editor;
 
@@ -543,7 +595,7 @@ mod input {
         // Load history from a file (ignore errors if file doesn't exist)
         let _ = rl.load_history("history.txt");
 
-        let prompt_str = "⏣ | ".bright_green().to_string();
+        let prompt_str = format!("{} | ", ch::SP1).bright_green().to_string();
 
         match rl.readline(&prompt_str) {
             Ok(line) => {
@@ -708,11 +760,15 @@ mod gm {
 // CLI functions call actions::
 // Handle IO
 mod cli {
-    use crate::entity::Entity;
-    use crate::entity::EntityClass;
+    use crate::ch;
     use crate::entity_list::EntityList;
     use crate::gm::GM;
+    use crate::item_meta::ILM;
     use crate::pos::Position;
+    use crate::{
+        ItemName,
+        entity::{Entity, EntityClass},
+    };
     use colored::*;
     use std::collections::HashMap;
 
@@ -729,6 +785,8 @@ mod cli {
         JumpCheckRel,
         Entities,
         Cargo,
+        Buy,
+        Sell,
         DockList,
         Dock,
         Undock,
@@ -848,6 +906,24 @@ mod cli {
             },
         );
         map.insert(
+            CmdName::Buy,
+            CmdMeta {
+                full: "buy",
+                short: "b",
+                params: "ent_id item qty",
+                desc: "Buy specified quantity of an item.",
+            },
+        );
+        map.insert(
+            CmdName::Sell,
+            CmdMeta {
+                full: "sell",
+                short: "sl",
+                params: "ent_id item qty",
+                desc: "Sell specified quantity of an item.",
+            },
+        );
+        map.insert(
             CmdName::DockList,
             CmdMeta {
                 full: "dock_list",
@@ -939,6 +1015,8 @@ mod cli {
         pub gm: GM,
     }
     impl CLI {
+        // Meta
+
         pub fn new() -> Self {
             CLI {
                 last_id: 0,
@@ -951,6 +1029,19 @@ mod cli {
             let cmd = self.meta.get(&target).unwrap();
             v == cmd.full || v == cmd.short
         }
+
+        // Generate a single line entity string
+        fn ent_line_str(&self, ent_id: i32, ent_list: &EntityList) -> String {
+            let ent = ent_list.get_by_id(ent_id).unwrap();
+            format!("{} [{}] ({} {})", ent.name, ent.id, ent.pos.x, ent.pos.y,)
+        }
+        // Print single line entity string
+        fn print_ent_line(&self, ent_id: i32, ent_list: &EntityList) {
+            let ent_str = self.ent_line_str(ent_id, ent_list);
+            println!("{}{:^62}{}", ch::ARL, ent_str, ch::ARR);
+        }
+
+        // Commands
 
         pub fn intro(&self) {
             CLI::cli_header("SpaceTrade.rs CLI");
@@ -1027,6 +1118,8 @@ mod cli {
                 }
             };
             self.gm.set_target(ship, ent_id);
+
+            self.print_ent_line(ent_id, entities);
             println!("Target set to entity ID {}", ent_id);
 
             self.last_id = ent_id;
@@ -1054,9 +1147,11 @@ mod cli {
                 println!("Usage: scan [<entity_id>]");
             }
 
+            self.print_ent_line(ent.id, entities);
+
             println!("Name: {}", ent.name);
             println!("ID  : {}", ent.id);
-            println!("Credits: {}", ent.credits);
+            println!("Credits: {}", ent.fin.credits);
             println!("Class: {:?}", ent.class);
             println!("Targeting: {:?}", ent.target_id);
             let docked_ent = match ent.docked_to {
@@ -1093,6 +1188,9 @@ mod cli {
                 println!("No entity found with ID {}.", ent_id);
                 return;
             };
+
+            self.print_ent_line(ent_id, entities);
+
             self._jump(entities.get_player_mut().unwrap(), &ent_pos);
 
             self.last_id = ent_id;
@@ -1119,6 +1217,7 @@ mod cli {
             };
             let ship = entities.get_player().unwrap();
             let res = self.gm.jump_check(ship, &target_pos);
+            self.print_ent_line(ent_id, entities);
             println!("Jump Check complete.");
             println!("Distance: {} ly", res.distance);
             println!("Fuel needed: {}g", res.fuel_needed);
@@ -1234,8 +1333,52 @@ mod cli {
 
         pub fn cargo(&self, cmd: Vec<&str>, entities: &EntityList) {
             CLI::cli_header("Cargo Hold");
-            let ent = entities.get_player().unwrap();
-            ent.hold.print();
+            let ent: &Entity = entities.get_player().unwrap();
+
+            self.print_ent_line(ent.id, entities);
+
+            let hold = &ent.hold;
+            println!("Cargo Hold: {}/{}", hold.vol, hold.vol_max);
+            println!("-------");
+
+            // Sort alphabetically by fname
+            let mut items: Vec<(&ItemName, &i32)> = hold.inv.items();
+            items.sort_by_key(|(item, _)| {
+                let meta = ILM.get_by_enum(item).unwrap();
+                meta.fname.clone()
+            });
+            for (item, qty) in items {
+                let meta = ILM.get_by_enum(item).unwrap();
+                println!("{:<24}: {}", meta.fname, qty);
+            }
+        }
+
+        pub fn buy(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
+            CLI::cli_header("Buy Items");
+            if cmd.len() < 4 {
+                println!("Usage: buy <ent_id> <item> <qty>");
+                return;
+            }
+            let ent_id: i32 = match cmd[1].parse() {
+                Ok(num) => num,
+                Err(_) => {
+                    println!("Invalid entity ID.");
+                    return;
+                }
+            };
+            let item = ILM.get_by_str(cmd[2]).unwrap();
+            let qty: i32 = match cmd[3].parse() {
+                Ok(num) => num,
+                Err(_) => {
+                    println!("Invalid quantity.");
+                    return;
+                }
+            };
+            println!("Buying {} of {} from entity ID {}", qty, item.fname, ent_id);
+        }
+
+        pub fn sell(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
+            CLI::cli_header("Sell Items");
         }
 
         pub fn entities(&self, cmd: Vec<&str>, entities: &EntityList) {
@@ -1304,6 +1447,9 @@ mod cli {
                     return;
                 }
             };
+
+            self.print_ent_line(ent_id, entities);
+
             let res = self.gm.dock(entities, ent_id);
             if res.success {
                 println!("Docked to: {}", ent_id);
@@ -1350,16 +1496,16 @@ mod cli {
             }
             let cost_per_g = 0.2; // Example cost
             let mut total_cost = (amt_needed as f32 * cost_per_g) as i32;
-            if ship.credits < total_cost {
+            if ship.fin.credits < total_cost {
                 println!(
                     "Not enough credits to refuel completely. Need {}, have {}.",
-                    total_cost, ship.credits
+                    total_cost, ship.fin.credits
                 );
-                amt_needed = (ship.credits as f32 / cost_per_g) as i32;
+                amt_needed = (ship.fin.credits as f32 / cost_per_g) as i32;
                 println!("You can only afford to refuel {} g.", amt_needed);
-                total_cost = ship.credits;
+                total_cost = ship.fin.credits;
             }
-            ship.credits -= total_cost;
+            ship.fin.credits -= total_cost;
             ship.jump_drive.refuel(amt_needed);
             println!(
                 "Refueled {} g for {} credits. Current fuel: {}",
@@ -1491,6 +1637,9 @@ fn main() {
         // Flush stdout
         io::stdout().flush().unwrap();
 
+        // TODO:
+        // Use a command map to call functions dynamically
+        // This match is no good
         match cmd[0] {
             v if cli.check_cmd(v, CmdName::Help) => {
                 cli.help(cmd);
@@ -1524,6 +1673,12 @@ fn main() {
             }
             v if cli.check_cmd(v, CmdName::Cargo) => {
                 cli.cargo(cmd, &entities);
+            }
+            v if cli.check_cmd(v, CmdName::Buy) => {
+                cli.buy(cmd, &mut entities);
+            }
+            v if cli.check_cmd(v, CmdName::Sell) => {
+                cli.sell(cmd, &mut entities);
             }
             v if cli.check_cmd(v, CmdName::DockList) => {
                 cli.dock_list(cmd, &entities);
