@@ -331,10 +331,12 @@ mod entity {
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct EntityFlags {}
+    pub struct EntityFlags {
+        pub has_dock: bool,
+    }
     impl EntityFlags {
         pub fn new() -> Self {
-            EntityFlags {}
+            EntityFlags { has_dock: false }
         }
     }
 
@@ -376,6 +378,11 @@ mod entity {
             self.pos = position;
         }
         pub fn jump_to(&mut self, destination: &pos::Position) -> bool {
+            // Check if docked
+            if self.docked_to.is_some() {
+                println!("Cannot jump while docked. Undock first.");
+                return false;
+            }
             if self.jump_drive.jump(&self.pos, destination) {
                 self.pos = destination.clone();
                 true
@@ -405,6 +412,7 @@ mod entity_maker {
         }
         let mut ent = Entity::new(random_name(name_list).as_str());
         ent.class = EntityClass::Station;
+        ent.flags.has_dock = true;
         ent.set_pos(Position::random(UNIV.gal_size));
         ent
     }
@@ -466,10 +474,15 @@ mod entity_list {
             self.entities.iter().collect()
         }
         pub fn list_by_distance(&self, origin: Position, max_distance: i32) -> Vec<&Entity> {
-            self.entities
+            let list = self
+                .entities
                 .iter()
                 .filter(|ent| origin.distance(&ent.pos) <= max_distance)
-                .collect()
+                .collect();
+            // Sort by distance
+            let mut sorted_list: Vec<&Entity> = list;
+            sorted_list.sort_by_key(|ent| origin.distance(&ent.pos));
+            sorted_list
         }
         pub fn print(&self, ship: &Entity) {
             for (i, ent) in self.entities.iter().enumerate() {
@@ -515,13 +528,13 @@ mod cmds {
     }
 
     pub fn scan(ship: &Entity, ent_list: &EntityList) {
-        println!("Ship Name: {}", ship.name);
-        println!("Ship ID  : {}", ship.id);
-        println!("Ship Class: {:?}", ship.class);
-        println!("Target ID: {:?}", ship.target_id);
+        println!("Name: {}", ship.name);
+        println!("ID  : {}", ship.id);
+        println!("Class: {:?}", ship.class);
+        println!("Targeting: {:?}", ship.target_id);
         let docked_ent = match ship.docked_to {
             Some(id) => ent_list.get_by_id(id).map(|e| e.name.clone()),
-            None => None,
+            none => None,
         };
         if let Some(docked_name) = docked_ent {
             println!(
@@ -532,7 +545,6 @@ mod cmds {
         } else {
             println!("Docked to: None");
         }
-        ship.hold.print();
         ship.jump_drive.print();
         ship.pos.print();
     }
@@ -543,11 +555,12 @@ mod cmds {
             let target_pos = target.pos.clone();
             let target_name = target.name.clone();
 
-            let ship = ent_list.get_player_mut().unwrap();
-            if ship.jump_to(&target_pos) {
+            let ent = ent_list.get_player_mut().unwrap();
+            if ent.jump_to(&target_pos) {
                 println!("Jumped to {}:", target_name);
-                println!("Fuel remaining: {}g", ship.jump_drive.fuel_cur);
-                ship.pos.print();
+                println!("Fuel remaining: {}g", ent.jump_drive.fuel_cur);
+                ent.pos.print();
+                ent.target_id = Some(ent_id);
             } else {
                 println!("Jump failed.");
             }
@@ -611,7 +624,7 @@ mod cmds {
                 };
                 let distance = ship.pos.distance(&ent.pos);
                 println!(
-                    "{:<6}: [{}] {:<5} ly - ({:<5}, {:<5}) - {}",
+                    "{:<6}: [{}] {:>5} ly - ({:>5}, {:>5}) - {}",
                     ent.id, class_str, distance, ent.pos.x, ent.pos.y, ent.name
                 );
                 found += 1;
@@ -627,7 +640,7 @@ mod cmds {
         let nearby_stations: Vec<&Entity> = ent_list
             .list_by_distance(ship.pos, 1)
             .into_iter()
-            .filter(|ent| ent.name.contains("Station"))
+            .filter(|ent| ent.flags.has_dock)
             .collect();
         if nearby_stations.is_empty() {
             println!("No stations nearby to dock with.");
@@ -645,6 +658,10 @@ mod cmds {
 
     pub fn dock(ent_list: &mut EntityList, ent_id: i32) {
         if let Some(target) = ent_list.get_by_id(ent_id) {
+            if !target.flags.has_dock {
+                println!("Entity ID {} does not have docking capabilities.", ent_id);
+                return;
+            }
             // Clone/copy the needed data to end the immutable borrow
             let target_pos = target.pos.clone();
             let target_name = target.name.clone();
@@ -653,11 +670,21 @@ mod cmds {
             if ship.pos.distance(&target_pos) <= 1 {
                 println!("Docked with {}.", target_name);
                 ship.docked_to = Some(ent_id);
+                ship.target_id = Some(ent_id);
             } else {
                 println!("Docking failed: not close enough to {}.", target_name);
             }
         } else {
             println!("No entity found with ID {}.", ent_id);
+        }
+    }
+
+    pub fn undock(ent: &mut Entity) {
+        if let Some(docked_id) = ent.docked_to {
+            println!("Undocked from entity ID {}.", docked_id);
+            ent.docked_to = None;
+        } else {
+            println!("Not currently docked to any entity.");
         }
     }
 
@@ -691,11 +718,288 @@ use crate::pos::Position;
 use crate::univ::UNIV;
 use std::io::{self, Write};
 
-fn cmd_header(title: &str) {
-    println!("{}", "▀".repeat(64));
-    println!("██▀{:^57} ▄██", title.to_uppercase());
-    println!("{}", "▄".repeat(64));
-    println!();
+mod cli {
+    use crate::cmds;
+    use crate::entity_list::EntityList;
+    use crate::pos::Position;
+
+    fn cli_header(title: &str) {
+        println!("{}", "▀".repeat(64));
+        println!("██▀{:^57} ▄██", title.to_uppercase());
+        println!("{}", "▄".repeat(64));
+        println!();
+    }
+
+    pub fn intro() {
+        cli_header("SpaceTrade.rs CLI");
+        // println!("Type 'help' for a list of commands.");
+    }
+
+    pub fn target(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Target");
+        let ship = entities.get_player_mut().unwrap();
+        if cmd.len() < 2 {
+            if let Some(target_id) = ship.target_id {
+                println!("Current target ID: {}", target_id);
+            } else {
+                println!("No target set.");
+            }
+            return;
+        }
+        let ent_id: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid entity ID.");
+                return;
+            }
+        };
+        cmds::target(ship, ent_id);
+    }
+
+    pub fn scan(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Scan Report");
+        if cmd.len() == 1 {
+            cmds::scan(entities.get_player().unwrap(), &entities);
+        } else if cmd.len() == 2 {
+            let ent_id: i32 = match cmd[1].parse() {
+                Ok(num) => num,
+                Err(_) => {
+                    println!("Invalid entity ID.");
+                    return;
+                }
+            };
+            if let Some(ent) = entities.get_by_id(ent_id) {
+                cmds::scan(ent, &entities);
+            } else {
+                println!("No entity found with ID {}.", ent_id);
+            }
+        } else {
+            println!("Usage: scan [<entity_id>]");
+        }
+    }
+
+    pub fn jump(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Jump");
+        if cmd.len() < 2 {
+            println!("Usage: jump <entity_id>");
+            return;
+        }
+        let ent_id: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid entity ID.");
+                return;
+            }
+        };
+        cmds::jump_to(entities, ent_id);
+    }
+
+    pub fn jump_check(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Jump Check");
+        if cmd.len() < 2 {
+            println!("Usage: jump_check <entity_id>");
+            return;
+        }
+        let ent_id: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid entity ID.");
+                return;
+            }
+        };
+        cmds::jump_check(entities.get_player().unwrap(), &entities, ent_id);
+    }
+
+    pub fn jump_man(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Jump (Manual)");
+        if cmd.len() < 2 {
+            println!("Usage: jump_man <x> <y>");
+            return;
+        }
+        let x: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid x coordinate.");
+                return;
+            }
+        };
+        let y: i32 = match cmd[2].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid y coordinate.");
+                return;
+            }
+        };
+        let destination = Position::new(x, y);
+        cmds::jump_man(entities.get_player_mut().unwrap(), destination);
+    }
+
+    pub fn jump_check_man(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Jump Check (Manual)");
+        if cmd.len() < 3 {
+            println!("Usage: jump_check <x> <y>");
+            return;
+        }
+        let x: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid x coordinate.");
+                return;
+            }
+        };
+        let y: i32 = match cmd[2].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid y coordinate.");
+                return;
+            }
+        };
+        let destination = Position::new(x, y);
+        cmds::jump_check_man(entities.get_player().unwrap(), destination);
+    }
+
+    pub fn jump_rel(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Jump (Relative)");
+        if cmd.len() < 3 {
+            println!("Usage: jump_rel <dx> <dy>");
+            return;
+        }
+        let dx: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid x delta.");
+                return;
+            }
+        };
+        let dy: i32 = match cmd[2].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid y delta.");
+                return;
+            }
+        };
+        let ship = entities.get_player_mut().unwrap();
+        let destination = Position::new(ship.pos.x + dx, ship.pos.y + dy);
+        cmds::jump_man(ship, destination);
+    }
+
+    pub fn jump_check_rel(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Jump Check (Relative)");
+        if cmd.len() < 3 {
+            println!("Usage: jump_check_rel <dx> <dy>");
+            return;
+        }
+        let dx: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid x delta.");
+                return;
+            }
+        };
+        let dy: i32 = match cmd[2].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid y delta.");
+                return;
+            }
+        };
+        let ship = entities.get_player().unwrap();
+        let destination = Position::new(ship.pos.x + dx, ship.pos.y + dy);
+        cmds::jump_check_man(ship, destination);
+    }
+
+    pub fn cargo(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Cargo Hold");
+        cmds::cargo_list(entities.get_player().unwrap());
+    }
+
+    pub fn entities(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Entities List");
+        let max_distance: i32;
+        if cmd.len() < 2 {
+            max_distance = entities.get_player().unwrap().jump_drive.max_range;
+        } else {
+            max_distance = match cmd[1].parse() {
+                Ok(num) => num,
+                Err(_) => {
+                    println!("Invalid max distance.");
+                    return;
+                }
+            };
+        }
+        cmds::entities_list(&entities, entities.get_player().unwrap(), max_distance);
+    }
+
+    pub fn dock_list(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Dock List");
+        cmds::dock_list(entities.get_player().unwrap(), &entities);
+    }
+
+    pub fn dock(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Docking");
+        if cmd.len() < 2 {
+            println!("Usage: dock <entity_id>");
+            return;
+        }
+        let ent_id: i32 = match cmd[1].parse() {
+            Ok(num) => num,
+            Err(_) => {
+                println!("Invalid entity ID.");
+                return;
+            }
+        };
+        cmds::dock(entities, ent_id);
+    }
+
+    pub fn undock(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Undocking");
+        cmds::undock(entities.get_player_mut().unwrap());
+    }
+
+    pub fn name(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Rename Ship");
+        if cmd.len() < 2 {
+            println!("Usage: name <new_name>");
+            return;
+        }
+        let new_name = cmd[1..].join(" ");
+        cmds::name_ent(entities.get_player_mut().unwrap(), &new_name);
+    }
+
+    pub fn save(cmd: Vec<&str>, entities: &EntityList) {
+        cli_header("Save Game");
+        let filename = if cmd.len() < 2 {
+            "savegame.json"
+        } else {
+            cmd[1]
+        };
+        cmds::save(&entities, filename);
+    }
+
+    pub fn load(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Load Game");
+        let filename = if cmd.len() < 2 {
+            "savegame.json"
+        } else {
+            cmd[1]
+        };
+        *entities = cmds::load(filename);
+        if let Some(ship) = entities.get_by_id_mut(0) {
+            // my_ship = ship;
+        } else {
+            println!("Warning: No ship found in loaded data.");
+        }
+    }
+
+    pub fn quit(cmd: Vec<&str>) {
+        cli_header("Goodbye");
+        println!("Exiting...");
+    }
+
+    pub fn unknown(cmd: Vec<&str>) {
+        cli_header("Unknown Command");
+        println!("Unknown command: {}", cmd[0]);
+    }
 }
 
 fn main() {
@@ -713,7 +1017,7 @@ fn main() {
 
     let mut entities = EntityList::new();
 
-    let mut start_ship = Entity::new("My Ship");
+    let mut start_ship = Entity::new("Ferris 1");
     start_ship.class = EntityClass::Craft;
     start_ship.hold.insert(ItemName::MetalLow, 20);
     start_ship.hold.insert(ItemName::CompositeMid, 15);
@@ -724,6 +1028,8 @@ fn main() {
 
     entities.generate_entities(&name_list, UNIV.starting_entities as usize);
 
+    cli::intro();
+
     loop {
         let mut cmd_raw = prompt();
         // Replace "@" with current target ID
@@ -732,187 +1038,69 @@ fn main() {
             println!("(Replaced @ with target ID {})", target_id);
         }
         let cmd: Vec<&str> = cmd_raw.split_whitespace().collect();
+        if cmd.is_empty() {
+            continue;
+        }
         // Clear screen
         print!("\x1B[2J\x1B[1;1H");
         // Flush stdout
         io::stdout().flush().unwrap();
         match cmd[0] {
             "target" | "t" => {
-                cmd_header("Target");
-                if cmd.len() < 2 {
-                    println!("Usage: target <entity_id>");
-                    continue;
-                }
-                let ent_id: i32 = match cmd[1].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid entity ID.");
-                        continue;
-                    }
-                };
-                let ship = entities.get_player_mut().unwrap();
-                cmds::target(ship, ent_id);
+                cli::target(cmd, &mut entities);
             }
             // TODO: Update scan to allow scanning other entities
             "scan" | "s" => {
-                cmd_header("Ship Status");
-                cmds::scan(entities.get_player().unwrap(), &entities);
+                cli::scan(cmd, &entities);
             }
             "jump" | "j" => {
-                cmd_header("Jump");
-                if cmd.len() < 2 {
-                    println!("Usage: jump_man <entity_id>");
-                    continue;
-                }
-                let ent_id: i32 = match cmd[1].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid entity ID.");
-                        continue;
-                    }
-                };
-                cmds::jump_to(&mut entities, ent_id);
+                cli::jump(cmd, &mut entities);
             }
             "cargo" | "c" => {
-                cmd_header("Cargo Hold");
-                cmds::cargo_list(entities.get_player().unwrap());
+                cli::cargo(cmd, &entities);
             }
             "jump_man" | "jm" => {
-                cmd_header("Jump (Manual)");
-                if cmd.len() < 2 {
-                    println!("Usage: jump_man <x> <y>");
-                    continue;
-                }
-                let x: i32 = match cmd[1].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid x coordinate.");
-                        continue;
-                    }
-                };
-                let y: i32 = match cmd[2].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid y coordinate.");
-                        continue;
-                    }
-                };
-                let destination = Position::new(x, y);
-                cmds::jump_man(entities.get_player_mut().unwrap(), destination);
+                cli::jump_man(cmd, &mut entities);
             }
             "jump_check" | "jc" => {
-                cmd_header("Jump Check");
-                if cmd.len() < 2 {
-                    println!("Usage: jump_check <entity_id>");
-                    continue;
-                }
-                let ent_id: i32 = match cmd[1].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid entity ID.");
-                        continue;
-                    }
-                };
-                cmds::jump_check(entities.get_player().unwrap(), &entities, ent_id);
+                cli::jump_check(cmd, &entities);
             }
             "jump_check_man" | "jcm" => {
-                cmd_header("Jump Check (Manual)");
-                if cmd.len() < 3 {
-                    println!("Usage: jump_check <x> <y>");
-                    continue;
-                }
-                let x: i32 = match cmd[1].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid x coordinate.");
-                        continue;
-                    }
-                };
-                let y: i32 = match cmd[2].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid y coordinate.");
-                        continue;
-                    }
-                };
-                let destination = Position::new(x, y);
-                cmds::jump_check_man(entities.get_player().unwrap(), destination);
+                cli::jump_check_man(cmd, &entities);
+            }
+            "jump_rel" | "jr" => {
+                cli::jump_rel(cmd, &mut entities);
+            }
+            "jump_check_rel" | "jcr" => {
+                cli::jump_check_rel(cmd, &entities);
             }
             "entities" | "l" => {
-                cmd_header("Entities List");
-                let max_distance: i32;
-                if cmd.len() < 2 {
-                    max_distance = entities.get_player().unwrap().jump_drive.max_range;
-                } else {
-                    max_distance = match cmd[1].parse() {
-                        Ok(num) => num,
-                        Err(_) => {
-                            println!("Invalid max distance.");
-                            continue;
-                        }
-                    };
-                }
-                cmds::entities_list(&entities, entities.get_player().unwrap(), max_distance);
+                cli::entities(cmd, &entities);
             }
             "dock_list" | "dl" => {
-                cmd_header("Dock");
-                cmds::dock_list(entities.get_player().unwrap(), &entities);
+                cli::dock_list(cmd, &entities);
             }
             "dock" | "d" => {
-                cmd_header("Docking");
-                if cmd.len() < 2 {
-                    println!("Usage: dock <entity_id>");
-                    continue;
-                }
-                let ent_id: i32 = match cmd[1].parse() {
-                    Ok(num) => num,
-                    Err(_) => {
-                        println!("Invalid entity ID.");
-                        continue;
-                    }
-                };
-                cmds::dock(&mut entities, ent_id);
+                cli::dock(cmd, &mut entities);
+            }
+            "undock" | "ud" => {
+                cli::undock(cmd, &mut entities);
             }
             "name" => {
-                cmd_header("Rename Ship");
-                if cmd.len() < 2 {
-                    println!("Usage: name <new_name>");
-                    continue;
-                }
-                let new_name = cmd[1..].join(" ");
-                cmds::name_ent(entities.get_player_mut().unwrap(), &new_name);
+                cli::name(cmd, &mut entities);
             }
             "save" => {
-                cmd_header("Save Game");
-                let filename = if cmd.len() < 2 {
-                    "savegame.json"
-                } else {
-                    cmd[1]
-                };
-                cmds::save(&entities, filename);
+                cli::save(cmd, &entities);
             }
             "load" => {
-                cmd_header("Load Game");
-                let filename = if cmd.len() < 2 {
-                    "savegame.json"
-                } else {
-                    cmd[1]
-                };
-                entities = cmds::load(filename);
-                if let Some(ship) = entities.get_by_id_mut(0) {
-                    // my_ship = ship;
-                } else {
-                    println!("Warning: No ship found in loaded data.");
-                }
+                cli::load(cmd, &mut entities);
             }
             "quit" | "exit" | "q" => {
-                cmd_header("Goodbye");
-                println!("Exiting...");
+                cli::quit(cmd);
                 break;
             }
             _ => {
-                cmd_header("ERROR");
-                println!("Unknown command: {}", cmd_raw);
+                cli::unknown(cmd);
             }
         }
     }
