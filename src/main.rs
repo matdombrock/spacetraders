@@ -542,6 +542,7 @@ mod input {
         // Load history from a file (ignore errors if file doesn't exist)
         let _ = rl.load_history("history.txt");
 
+        println!();
         // Read line with editing and history support
         match rl.readline("Δ | ") {
             Ok(line) => {
@@ -698,18 +699,282 @@ mod cli {
     use crate::entity::EntityClass;
     use crate::entity_list::EntityList;
     use crate::pos::Position;
+    use std::collections::HashMap;
 
+    #[derive(Hash, Eq, PartialEq, Debug)]
+    pub enum CLICmdName {
+        Help,
+        Target,
+        Scan,
+        Jump,
+        JumpMan,
+        JumpCheckMan,
+        JumpCheck,
+        JumpRel,
+        JumpCheckRel,
+        Entities,
+        Cargo,
+        DockList,
+        Dock,
+        Undock,
+        Refuel,
+        Name,
+        Save,
+        Load,
+        Quit,
+    }
+    pub struct CLICmd {
+        full: &'static str,
+        short: &'static str,
+        params: &'static str, // req opt?
+        desc: &'static str,
+    }
+    fn make_cli_meta() -> HashMap<CLICmdName, CLICmd> {
+        let mut map: HashMap<CLICmdName, CLICmd> = HashMap::new();
+        map.insert(
+            CLICmdName::Help,
+            CLICmd {
+                full: "help",
+                short: "h",
+                params: "",
+                desc: "Show this help message.",
+            },
+        );
+        map.insert(
+            CLICmdName::Target,
+            CLICmd {
+                full: "target",
+                short: "t",
+                params: "ent_id?",
+                desc: "Set or view current target entity by ID.",
+            },
+        );
+        map.insert(
+            CLICmdName::Scan,
+            CLICmd {
+                full: "scan",
+                short: "s",
+                params: "ent_id?",
+                desc: "Scan an entity by ID or self if no ID provided.",
+            },
+        );
+        map.insert(
+            CLICmdName::Jump,
+            CLICmd {
+                full: "jump",
+                short: "j",
+                params: "ent_id",
+                desc: "Jump to target entity by ID.",
+            },
+        );
+        map.insert(
+            CLICmdName::JumpMan,
+            CLICmd {
+                full: "jump_man",
+                short: "jm",
+                params: "x y",
+                desc: "Jump to specified coordinates.",
+            },
+        );
+        map.insert(
+            CLICmdName::JumpCheckMan,
+            CLICmd {
+                full: "jump_check_man",
+                short: "jcm",
+                params: "x y",
+                desc: "Check jump feasibility to specified coordinates.",
+            },
+        );
+        map.insert(
+            CLICmdName::JumpCheck,
+            CLICmd {
+                full: "jump_check",
+                short: "jc",
+                params: "ent_id",
+                desc: "Check jump feasibility to target entity by ID.",
+            },
+        );
+        map.insert(
+            CLICmdName::JumpRel,
+            CLICmd {
+                full: "jump_rel",
+                short: "jr",
+                params: "x y",
+                desc: "Jump to coordinates relative to current position.",
+            },
+        );
+        map.insert(
+            CLICmdName::JumpCheckRel,
+            CLICmd {
+                full: "jump_check_rel",
+                short: "jcr",
+                params: "x y",
+                desc: "Check jump feasibility to coordinates relative to current position.",
+            },
+        );
+        map.insert(
+            CLICmdName::Entities,
+            CLICmd {
+                full: "entities",
+                short: "l",
+                params: "dist",
+                desc: "List entities within jump range.",
+            },
+        );
+        map.insert(
+            CLICmdName::Cargo,
+            CLICmd {
+                full: "cargo",
+                short: "c",
+                params: "ent_id",
+                desc: "View cargo hold contents.",
+            },
+        );
+        map.insert(
+            CLICmdName::DockList,
+            CLICmd {
+                full: "dock_list",
+                short: "dl",
+                params: "",
+                desc: "List nearby docking-capable entities.",
+            },
+        );
+        map.insert(
+            CLICmdName::Dock,
+            CLICmd {
+                full: "dock",
+                short: "d",
+                params: "ent_id",
+                desc: "Dock with a specified entity by ID.",
+            },
+        );
+        map.insert(
+            CLICmdName::Undock,
+            CLICmd {
+                full: "undock",
+                short: "ud",
+                params: "",
+                desc: "Undock from the currently docked entity.",
+            },
+        );
+        map.insert(
+            CLICmdName::Refuel,
+            CLICmd {
+                full: "refuel",
+                short: "rf",
+                params: "",
+                desc: "Refuel the ship's jump drive while docked.",
+            },
+        );
+        map.insert(
+            CLICmdName::Name,
+            CLICmd {
+                full: "name",
+                short: "n",
+                params: "",
+                desc: "Rename the player's ship.",
+            },
+        );
+        map.insert(
+            CLICmdName::Save,
+            CLICmd {
+                full: "save",
+                short: "sv",
+                params: "file",
+                desc: "Save the current game state to a file.",
+            },
+        );
+        map.insert(
+            CLICmdName::Load,
+            CLICmd {
+                full: "load",
+                short: "ld",
+                params: "file",
+                desc: "Load a game state from a file.",
+            },
+        );
+        map.insert(
+            CLICmdName::Quit,
+            CLICmd {
+                full: "quit",
+                short: "q",
+                params: "",
+                desc: "Exit the game.",
+            },
+        );
+        map
+    }
     pub struct CLI {
         pub last_id: i32,
+        pub meta: HashMap<CLICmdName, CLICmd>,
     }
     impl CLI {
         pub fn new() -> Self {
-            CLI { last_id: 0 }
+            CLI {
+                last_id: 0,
+                meta: make_cli_meta(),
+            }
+        }
+
+        pub fn check_cmd(&self, v: &str, target: CLICmdName) -> bool {
+            let cmd = self.meta.get(&target).unwrap();
+            v == cmd.full || v == cmd.short
         }
 
         pub fn intro(&self) {
             CLI::cli_header("SpaceTrade.rs CLI");
-            // println!("Type 'help' for a list of commands.");
+            println!("Type 'help' for a list of commands.");
+        }
+
+        pub fn help(&self, cmd: Vec<&str>) {
+            fn print_full(cmd: &CLICmd) {
+                print!("{} {}", cmd.full, cmd.params);
+                println!(" | {}", cmd.short);
+                println!("-- {}", cmd.desc);
+            }
+            CLI::cli_header("Help");
+            let mut mode = "short";
+            if cmd.len() >= 2 {
+                mode = cmd[1];
+            }
+            if mode == "full" {
+                println!("Available commands:");
+                let mut cmds: Vec<(&CLICmdName, &CLICmd)> = self.meta.iter().collect();
+                cmds.sort_by_key(|(_, cmd)| cmd.full);
+                for (_, cmd) in cmds {
+                    print_full(cmd);
+                }
+                return;
+            }
+            if mode == "min" {
+                println!("Available commands:");
+                let mut cmds: Vec<(&CLICmdName, &CLICmd)> = self.meta.iter().collect();
+                cmds.sort_by_key(|(_, cmd)| cmd.full);
+                for (_, cmd) in cmds {
+                    print!("{} ", cmd.full);
+                }
+                println!();
+                return;
+            }
+            if mode == "short" {
+                println!("Available commands:");
+                let mut cmds: Vec<(&CLICmdName, &CLICmd)> = self.meta.iter().collect();
+                cmds.sort_by_key(|(_, cmd)| cmd.full);
+                for (_, cmd) in cmds {
+                    println!("{} ", cmd.full);
+                }
+                return;
+            }
+            // Check if mode matches a command
+            // If so, print detailed help for that command
+            // Otherwise, print error
+            for (_, cmd) in self.meta.iter() {
+                if mode == cmd.full || mode == cmd.short {
+                    print_full(cmd);
+                    return;
+                }
+            }
+            println!("No help found for '{}'.", mode);
         }
 
         pub fn target(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1116,6 +1381,7 @@ mod cli {
     }
 }
 
+use crate::cli::CLICmdName;
 use crate::entity::Entity;
 use crate::entity::EntityClass;
 use crate::entity_list::EntityList;
@@ -1153,6 +1419,8 @@ fn main() {
 
     let mut cli = cli::CLI::new();
 
+    cli.intro();
+
     loop {
         let mut cmd_raw = prompt();
         // Replace "@" with current target ID
@@ -1177,58 +1445,61 @@ fn main() {
         io::stdout().flush().unwrap();
 
         match cmd[0] {
-            "target" | "t" => {
+            v if cli.check_cmd(v, CLICmdName::Help) => {
+                cli.help(cmd);
+            }
+            v if cli.check_cmd(v, CLICmdName::Target) => {
                 cli.target(cmd, &mut entities);
             }
-            "scan" | "s" => {
+            v if cli.check_cmd(v, CLICmdName::Scan) => {
                 cli.scan(cmd, &entities);
             }
-            "jump" | "j" => {
+            v if cli.check_cmd(v, CLICmdName::Jump) => {
                 cli.jump(cmd, &mut entities);
             }
-            "cargo" | "c" => {
-                cli.cargo(cmd, &entities);
-            }
-            "jump_man" | "jm" => {
+            v if cli.check_cmd(v, CLICmdName::JumpMan) => {
                 cli.jump_man(cmd, &mut entities);
             }
-            "jump_check" | "jc" => {
+            v if cli.check_cmd(v, CLICmdName::JumpCheck) => {
                 cli.jump_check(cmd, &entities);
             }
-            "jump_check_man" | "jcm" => {
+            v if cli.check_cmd(v, CLICmdName::JumpCheckMan) => {
                 cli.jump_check_man(cmd, &entities);
             }
-            "jump_rel" | "jr" => {
+            v if cli.check_cmd(v, CLICmdName::JumpRel) => {
                 cli.jump_rel(cmd, &mut entities);
             }
-            "jump_check_rel" | "jcr" => {
+            v if cli.check_cmd(v, CLICmdName::JumpCheckRel) => {
                 cli.jump_check_rel(cmd, &entities);
             }
-            "entities" | "l" => {
+            v if cli.check_cmd(v, CLICmdName::Entities) => {
                 cli.entities(cmd, &entities);
             }
-            "dock_list" | "dl" => {
+            v if cli.check_cmd(v, CLICmdName::Cargo) => {
+                cli.cargo(cmd, &entities);
+            }
+            v if cli.check_cmd(v, CLICmdName::DockList) => {
                 cli.dock_list(cmd, &entities);
             }
-            "dock" | "d" => {
+            v if cli.check_cmd(v, CLICmdName::Dock) => {
                 cli.dock(cmd, &mut entities);
             }
-            "undock" | "ud" => {
+            v if cli.check_cmd(v, CLICmdName::Undock) => {
                 cli.undock(cmd, &mut entities);
             }
-            "refuel" | "rf" => {
+            v if cli.check_cmd(v, CLICmdName::Refuel) => {
                 cli.refuel(cmd, &mut entities);
             }
-            "name" => {
+            v if cli.check_cmd(v, CLICmdName::Name) => {
                 cli.name(cmd, &mut entities);
             }
-            "save" => {
+            v if cli.check_cmd(v, CLICmdName::Save) => {
                 cli.save(cmd, &entities);
             }
-            "load" => {
+            v if cli.check_cmd(v, CLICmdName::Load) => {
                 cli.load(cmd, &mut entities);
             }
-            "quit" | "exit" | "q" => {
+            v if cli.check_cmd(v, CLICmdName::Quit) => {
                 cli.quit(cmd);
                 break;
             }
