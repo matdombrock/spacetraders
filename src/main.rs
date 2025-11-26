@@ -22,6 +22,11 @@ mod pos {
         pub x: i32,
         pub y: i32,
     }
+    impl std::fmt::Display for Position {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "x:{}, y:{}", self.x, self.y)
+        }
+    }
     impl Position {
         pub fn new(x: i32, y: i32) -> Self {
             Position { x, y }
@@ -37,9 +42,6 @@ mod pos {
             let dx = (other.x - self.x) as f64;
             let dy = (other.y - self.y) as f64;
             (dx * dx + dy * dy).sqrt() as i32
-        }
-        pub fn print(&self) {
-            println!("Position: ({}, {})", self.x, self.y);
         }
     }
 }
@@ -154,13 +156,6 @@ mod item_meta {
         }
         pub fn get(&self, item: &ItemName) -> Option<&ItemMeta> {
             self.0.get(item)
-        }
-        pub fn print(&self, item: &ItemName) {
-            if let Some(meta) = self.get(item) {
-                println!("{meta:?}");
-            } else {
-                println!("Item {:?} not found in metadata.", item);
-            }
         }
     }
 
@@ -329,7 +324,6 @@ mod jump_drive {
             res
         }
         pub fn print(&self) {
-            println!("-------");
             println!("Jump Drive: {}/{}g", self.fuel_cur, self.fuel_max);
             println!("Max Range: {} ly", self.max_range);
             println!("Fuel per ly: {}", self.fuel_per_ly);
@@ -519,7 +513,6 @@ mod entity_list {
                     "{}: {} [{}] ({} {})",
                     ent.id, ent.name, distance, ent.pos.x, ent.pos.y
                 );
-                println!("-------");
             }
         }
     }
@@ -566,7 +559,7 @@ mod actions {
         pub message: String,
     }
 
-    pub fn target(ship: &mut Entity, ent_id: i32) -> ARres {
+    pub fn set_target(ship: &mut Entity, ent_id: i32) -> ARres {
         ship.target_id = Some(ent_id);
         ARres { success: true }
     }
@@ -722,7 +715,7 @@ mod cli {
                 return;
             }
         };
-        actions::target(ship, ent_id);
+        actions::set_target(ship, ent_id);
         println!("Target set to entity ID {}", ent_id);
     }
 
@@ -762,7 +755,7 @@ mod cli {
             println!("Docked to: None");
         }
         ent.jump_drive.print();
-        ent.pos.print();
+        println!("Position: {}", ent.pos);
     }
 
     pub fn jump(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -981,7 +974,16 @@ mod cli {
 
     pub fn dock_list(cmd: Vec<&str>, entities: &EntityList) {
         cli_header("Dock List");
-        actions::dock_list(entities.get_player().unwrap(), &entities);
+        println!("Nearby docking-capable entities:");
+        let res = actions::dock_list(entities.get_player().unwrap(), &entities);
+        if res.entities.is_empty() {
+            println!("No docking-capable entities nearby.");
+        } else {
+            for ent in res.entities {
+                let distance = entities.get_player().unwrap().pos.distance(&ent.pos);
+                println!("ID {}: {} ({} ly away)", ent.id, ent.name, distance);
+            }
+        }
     }
 
     pub fn dock(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1023,6 +1025,7 @@ mod cli {
             cmd[1]
         };
         actions::save(&entities, filename);
+        println!("Game saved to {}", filename);
     }
 
     pub fn load(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1032,6 +1035,7 @@ mod cli {
         } else {
             cmd[1]
         };
+        println!("Loaded game from {}", filename);
     }
 
     pub fn quit(cmd: Vec<&str>) {
@@ -1097,6 +1101,8 @@ fn main() {
         print!("\x1B[2J\x1B[1;1H");
         // Flush stdout
         io::stdout().flush().unwrap();
+
+        let x = "asd";
         match cmd[0] {
             "target" | "t" => {
                 cli::target(cmd, &mut entities);
