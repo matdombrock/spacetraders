@@ -416,17 +416,18 @@ mod entity_list {
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct EntityList {
+        id_acc: i32,
         entities: Vec<Entity>,
     }
     impl EntityList {
         pub fn new() -> Self {
             EntityList {
                 entities: Vec::new(),
+                id_acc: 0,
             }
         }
         pub fn add(&mut self, mut entity: Entity) {
-            let id = self.entities.len() as i32;
-            entity.id = id;
+            entity.id = self.id_acc;
             self.entities.push(entity);
         }
         pub fn get(&self, index: usize) -> Option<&Entity> {
