@@ -703,7 +703,7 @@ mod cli {
     use std::collections::HashMap;
 
     #[derive(Hash, Eq, PartialEq, Debug)]
-    pub enum CLICmdName {
+    pub enum CmdName {
         Help,
         Target,
         Scan,
@@ -724,17 +724,18 @@ mod cli {
         Load,
         Quit,
     }
-    pub struct CLICmd {
+    pub struct CmdMeta {
         full: &'static str,
         short: &'static str,
         params: &'static str, // req opt?
         desc: &'static str,
     }
-    fn make_cli_meta() -> HashMap<CLICmdName, CLICmd> {
-        let mut map: HashMap<CLICmdName, CLICmd> = HashMap::new();
+    type CmdMetaMap = HashMap<CmdName, CmdMeta>;
+    fn make_cli_meta() -> CmdMetaMap {
+        let mut map: CmdMetaMap = HashMap::new();
         map.insert(
-            CLICmdName::Help,
-            CLICmd {
+            CmdName::Help,
+            CmdMeta {
                 full: "help",
                 short: "h",
                 params: "",
@@ -742,8 +743,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Target,
-            CLICmd {
+            CmdName::Target,
+            CmdMeta {
                 full: "target",
                 short: "t",
                 params: "ent_id?",
@@ -751,8 +752,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Scan,
-            CLICmd {
+            CmdName::Scan,
+            CmdMeta {
                 full: "scan",
                 short: "s",
                 params: "ent_id?",
@@ -760,8 +761,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Jump,
-            CLICmd {
+            CmdName::Jump,
+            CmdMeta {
                 full: "jump",
                 short: "j",
                 params: "ent_id",
@@ -769,8 +770,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::JumpMan,
-            CLICmd {
+            CmdName::JumpMan,
+            CmdMeta {
                 full: "jump_man",
                 short: "jm",
                 params: "x y",
@@ -778,8 +779,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::JumpCheckMan,
-            CLICmd {
+            CmdName::JumpCheckMan,
+            CmdMeta {
                 full: "jump_check_man",
                 short: "jcm",
                 params: "x y",
@@ -787,8 +788,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::JumpCheck,
-            CLICmd {
+            CmdName::JumpCheck,
+            CmdMeta {
                 full: "jump_check",
                 short: "jc",
                 params: "ent_id",
@@ -796,8 +797,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::JumpRel,
-            CLICmd {
+            CmdName::JumpRel,
+            CmdMeta {
                 full: "jump_rel",
                 short: "jr",
                 params: "x y",
@@ -805,8 +806,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::JumpCheckRel,
-            CLICmd {
+            CmdName::JumpCheckRel,
+            CmdMeta {
                 full: "jump_check_rel",
                 short: "jcr",
                 params: "x y",
@@ -814,8 +815,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Entities,
-            CLICmd {
+            CmdName::Entities,
+            CmdMeta {
                 full: "entities",
                 short: "l",
                 params: "dist",
@@ -823,8 +824,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Cargo,
-            CLICmd {
+            CmdName::Cargo,
+            CmdMeta {
                 full: "cargo",
                 short: "c",
                 params: "ent_id",
@@ -832,8 +833,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::DockList,
-            CLICmd {
+            CmdName::DockList,
+            CmdMeta {
                 full: "dock_list",
                 short: "dl",
                 params: "",
@@ -841,8 +842,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Dock,
-            CLICmd {
+            CmdName::Dock,
+            CmdMeta {
                 full: "dock",
                 short: "d",
                 params: "ent_id",
@@ -850,8 +851,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Undock,
-            CLICmd {
+            CmdName::Undock,
+            CmdMeta {
                 full: "undock",
                 short: "ud",
                 params: "",
@@ -859,8 +860,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Refuel,
-            CLICmd {
+            CmdName::Refuel,
+            CmdMeta {
                 full: "refuel",
                 short: "rf",
                 params: "",
@@ -868,8 +869,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Name,
-            CLICmd {
+            CmdName::Name,
+            CmdMeta {
                 full: "name",
                 short: "n",
                 params: "",
@@ -877,8 +878,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Save,
-            CLICmd {
+            CmdName::Save,
+            CmdMeta {
                 full: "save",
                 short: "sv",
                 params: "file",
@@ -886,8 +887,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Load,
-            CLICmd {
+            CmdName::Load,
+            CmdMeta {
                 full: "load",
                 short: "ld",
                 params: "file",
@@ -895,8 +896,8 @@ mod cli {
             },
         );
         map.insert(
-            CLICmdName::Quit,
-            CLICmd {
+            CmdName::Quit,
+            CmdMeta {
                 full: "quit",
                 short: "q",
                 params: "",
@@ -907,7 +908,7 @@ mod cli {
     }
     pub struct CLI {
         pub last_id: i32,
-        pub meta: HashMap<CLICmdName, CLICmd>,
+        pub meta: CmdMetaMap,
     }
     impl CLI {
         pub fn new() -> Self {
@@ -917,7 +918,7 @@ mod cli {
             }
         }
 
-        pub fn check_cmd(&self, v: &str, target: CLICmdName) -> bool {
+        pub fn check_cmd(&self, v: &str, target: CmdName) -> bool {
             let cmd = self.meta.get(&target).unwrap();
             v == cmd.full || v == cmd.short
         }
@@ -928,7 +929,7 @@ mod cli {
         }
 
         pub fn help(&self, cmd: Vec<&str>) {
-            fn print_full(cmd: &CLICmd) {
+            fn print_full(cmd: &CmdMeta) {
                 print!("{} {}", cmd.full.green(), cmd.params.yellow());
                 println!(" | {}", cmd.short.blue());
                 println!("-- {}", cmd.desc);
@@ -940,7 +941,7 @@ mod cli {
             }
             if mode == "full" {
                 println!("Available commands:");
-                let mut cmds: Vec<(&CLICmdName, &CLICmd)> = self.meta.iter().collect();
+                let mut cmds: Vec<(&CmdName, &CmdMeta)> = self.meta.iter().collect();
                 cmds.sort_by_key(|(_, cmd)| cmd.full);
                 for (_, cmd) in cmds {
                     print_full(cmd);
@@ -949,7 +950,7 @@ mod cli {
             }
             if mode == "min" {
                 println!("Available commands:");
-                let mut cmds: Vec<(&CLICmdName, &CLICmd)> = self.meta.iter().collect();
+                let mut cmds: Vec<(&CmdName, &CmdMeta)> = self.meta.iter().collect();
                 cmds.sort_by_key(|(_, cmd)| cmd.full);
                 for (_, cmd) in cmds {
                     print!("{} ", cmd.full);
@@ -959,7 +960,7 @@ mod cli {
             }
             if mode == "short" {
                 println!("Available commands:");
-                let mut cmds: Vec<(&CLICmdName, &CLICmd)> = self.meta.iter().collect();
+                let mut cmds: Vec<(&CmdName, &CmdMeta)> = self.meta.iter().collect();
                 cmds.sort_by_key(|(_, cmd)| cmd.full);
                 for (_, cmd) in cmds {
                     println!("{} ", cmd.full);
@@ -1386,7 +1387,7 @@ mod cli {
     }
 }
 
-use crate::cli::CLICmdName;
+use crate::cli::CmdName;
 use crate::entity::Entity;
 use crate::entity::EntityClass;
 use crate::entity_list::EntityList;
@@ -1444,67 +1445,68 @@ fn main() {
         if cmd.is_empty() {
             continue;
         }
+
         // Clear screen
         print!("\x1B[2J\x1B[1;1H");
         // Flush stdout
         io::stdout().flush().unwrap();
 
         match cmd[0] {
-            v if cli.check_cmd(v, CLICmdName::Help) => {
+            v if cli.check_cmd(v, CmdName::Help) => {
                 cli.help(cmd);
             }
-            v if cli.check_cmd(v, CLICmdName::Target) => {
+            v if cli.check_cmd(v, CmdName::Target) => {
                 cli.target(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Scan) => {
+            v if cli.check_cmd(v, CmdName::Scan) => {
                 cli.scan(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Jump) => {
+            v if cli.check_cmd(v, CmdName::Jump) => {
                 cli.jump(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::JumpMan) => {
+            v if cli.check_cmd(v, CmdName::JumpMan) => {
                 cli.jump_man(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::JumpCheck) => {
+            v if cli.check_cmd(v, CmdName::JumpCheck) => {
                 cli.jump_check(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::JumpCheckMan) => {
+            v if cli.check_cmd(v, CmdName::JumpCheckMan) => {
                 cli.jump_check_man(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::JumpRel) => {
+            v if cli.check_cmd(v, CmdName::JumpRel) => {
                 cli.jump_rel(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::JumpCheckRel) => {
+            v if cli.check_cmd(v, CmdName::JumpCheckRel) => {
                 cli.jump_check_rel(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Entities) => {
+            v if cli.check_cmd(v, CmdName::Entities) => {
                 cli.entities(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Cargo) => {
+            v if cli.check_cmd(v, CmdName::Cargo) => {
                 cli.cargo(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::DockList) => {
+            v if cli.check_cmd(v, CmdName::DockList) => {
                 cli.dock_list(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Dock) => {
+            v if cli.check_cmd(v, CmdName::Dock) => {
                 cli.dock(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Undock) => {
+            v if cli.check_cmd(v, CmdName::Undock) => {
                 cli.undock(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Refuel) => {
+            v if cli.check_cmd(v, CmdName::Refuel) => {
                 cli.refuel(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Name) => {
+            v if cli.check_cmd(v, CmdName::Name) => {
                 cli.name(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Save) => {
+            v if cli.check_cmd(v, CmdName::Save) => {
                 cli.save(cmd, &entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Load) => {
+            v if cli.check_cmd(v, CmdName::Load) => {
                 cli.load(cmd, &mut entities);
             }
-            v if cli.check_cmd(v, CLICmdName::Quit) => {
+            v if cli.check_cmd(v, CmdName::Quit) => {
                 cli.quit(cmd);
                 break;
             }
