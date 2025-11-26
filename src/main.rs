@@ -699,6 +699,7 @@ mod cli {
     use crate::entity::EntityClass;
     use crate::entity_list::EntityList;
     use crate::pos::Position;
+    use colored::*;
     use std::collections::HashMap;
 
     #[derive(Hash, Eq, PartialEq, Debug)]
@@ -928,8 +929,8 @@ mod cli {
 
         pub fn help(&self, cmd: Vec<&str>) {
             fn print_full(cmd: &CLICmd) {
-                print!("{} {}", cmd.full, cmd.params);
-                println!(" | {}", cmd.short);
+                print!("{} {}", cmd.full.green(), cmd.params.yellow());
+                println!(" | {}", cmd.short.blue());
                 println!("-- {}", cmd.desc);
             }
             CLI::cli_header("Help");
@@ -1025,6 +1026,7 @@ mod cli {
 
             println!("Name: {}", ent.name);
             println!("ID  : {}", ent.id);
+            println!("Credits: {}", ent.credits);
             println!("Class: {:?}", ent.class);
             println!("Targeting: {:?}", ent.target_id);
             let docked_ent = match ent.docked_to {
@@ -1304,19 +1306,21 @@ mod cli {
                 println!("Must be docked to refuel.");
                 return;
             }
-            let amt_needed = ship.jump_drive.refuel_amt();
+            let mut amt_needed = ship.jump_drive.refuel_amt();
             if amt_needed == 0 {
                 println!("Jump drive is already full.");
                 return;
             }
-            let cost_per_g = 2; // Example cost
-            let total_cost = amt_needed * cost_per_g;
+            let cost_per_g = 0.2; // Example cost
+            let mut total_cost = (amt_needed as f32 * cost_per_g) as i32;
             if ship.credits < total_cost {
                 println!(
-                    "Not enough credits to refuel. Need {}, have {}.",
+                    "Not enough credits to refuel completely. Need {}, have {}.",
                     total_cost, ship.credits
                 );
-                return;
+                amt_needed = (ship.credits as f32 / cost_per_g) as i32;
+                println!("You can only afford to refuel {} g.", amt_needed);
+                total_cost = ship.credits;
             }
             ship.credits -= total_cost;
             ship.jump_drive.refuel(amt_needed);
@@ -1346,6 +1350,7 @@ mod cli {
             } else {
                 cmd[1]
             };
+            actions::load(entities, filename);
             println!("Loaded game from {}", filename);
         }
 
@@ -1374,7 +1379,7 @@ mod cli {
         }
         fn cli_header(title: &str) {
             println!("{}", "▀".repeat(64));
-            println!("██▀{:^57} ▄██", title.to_uppercase());
+            println!("██▀{:^58}▄██", title.to_uppercase().bright_blue());
             println!("{}", "▄".repeat(64));
             println!();
         }
