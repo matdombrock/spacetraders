@@ -356,6 +356,7 @@ mod entity {
         pub jump_drive: JumpDrive,
         pub flags: EntityFlags,
         pub docked_to: Option<i32>,
+        pub target_id: Option<i32>,
     }
     impl Entity {
         pub fn new(name: &str) -> Self {
@@ -368,6 +369,7 @@ mod entity {
                 jump_drive: JumpDrive::new(10, 100),
                 flags: EntityFlags::new(),
                 docked_to: None,
+                target_id: None,
             }
         }
         pub fn set_pos(&mut self, position: pos::Position) {
@@ -429,6 +431,7 @@ mod entity_list {
         pub fn add(&mut self, mut entity: Entity) {
             entity.id = self.id_acc;
             self.entities.push(entity);
+            self.id_acc += 1;
         }
         pub fn get(&self, index: usize) -> Option<&Entity> {
             self.entities.get(index)
@@ -504,11 +507,18 @@ mod input {
 }
 
 mod cmds {
+
     use crate::entity::Entity;
-    pub fn status(ship: &Entity, ent_list: &EntityList) {
+    pub fn target(ship: &mut Entity, ent_id: i32) {
+        ship.target_id = Some(ent_id);
+        println!("Target set to entity ID {}", ent_id);
+    }
+
+    pub fn scan(ship: &Entity, ent_list: &EntityList) {
         println!("Ship Name: {}", ship.name);
         println!("Ship ID  : {}", ship.id);
         println!("Ship Class: {:?}", ship.class);
+        println!("Target ID: {:?}", ship.target_id);
         let docked_ent = match ship.docked_to {
             Some(id) => ent_list.get_by_id(id).map(|e| e.name.clone()),
             None => None,
@@ -715,16 +725,38 @@ fn main() {
     entities.generate_entities(&name_list, UNIV.starting_entities as usize);
 
     loop {
-        let cmd_raw = prompt();
+        let mut cmd_raw = prompt();
+        // Replace "@" with current target ID
+        if let Some(target_id) = entities.get_player().unwrap().target_id {
+            cmd_raw = cmd_raw.replace("@", &target_id.to_string());
+            println!("(Replaced @ with target ID {})", target_id);
+        }
         let cmd: Vec<&str> = cmd_raw.split_whitespace().collect();
         // Clear screen
         print!("\x1B[2J\x1B[1;1H");
         // Flush stdout
         io::stdout().flush().unwrap();
         match cmd[0] {
-            "status" | "s" => {
+            "target" | "t" => {
+                cmd_header("Target");
+                if cmd.len() < 2 {
+                    println!("Usage: target <entity_id>");
+                    continue;
+                }
+                let ent_id: i32 = match cmd[1].parse() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        println!("Invalid entity ID.");
+                        continue;
+                    }
+                };
+                let ship = entities.get_player_mut().unwrap();
+                cmds::target(ship, ent_id);
+            }
+            // TODO: Update scan to allow scanning other entities
+            "scan" | "s" => {
                 cmd_header("Ship Status");
-                cmds::status(entities.get_player().unwrap(), &entities);
+                cmds::scan(entities.get_player().unwrap(), &entities);
             }
             "jump" | "j" => {
                 cmd_header("Jump");
