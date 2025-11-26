@@ -549,18 +549,23 @@ mod input {
 
 // Actions represent things the player can do
 // They should never print anything
-// Formatting is up to ui functions
+// Formatting and UX is up to ui functions
 mod actions {
+
+    use crate::entity::Entity;
+    use crate::entity_list::EntityList;
+    use crate::jump_drive::JumpRes;
+    use crate::pos::Position;
 
     pub struct ARres {
         pub success: bool,
     }
+
     pub struct AResMsg {
         pub success: bool,
         pub message: String,
     }
 
-    use crate::entity::Entity;
     pub fn target(ship: &mut Entity, ent_id: i32) -> ARres {
         ship.target_id = Some(ent_id);
         ARres { success: true }
@@ -589,21 +594,10 @@ mod actions {
     }
 
     type AResJump = JumpRes;
-    use crate::jump_drive::JumpRes;
-    use crate::pos::Position;
-    pub fn jump(ship: &mut Entity, destination: Position) -> AResJump {
-        let mut res = JumpRes::new();
-        if ship.jump(&destination).success {
-            res.success = true;
-            let distance = ship.pos.distance(&destination);
-            res.fuel_used = ship.jump_drive.calc_fuel(distance);
-        } else {
-            res.success = false;
-        }
-        res
+    pub fn jump(ent: &mut Entity, destination: Position) -> AResJump {
+        ent.jump(&destination)
     }
 
-    use crate::entity_list::EntityList;
     pub struct AResEntList {
         pub entities: Vec<Entity>,
     }
@@ -694,6 +688,7 @@ mod actions {
 // Handle IO
 mod cli {
     use crate::actions;
+    use crate::entity::EntityClass;
     use crate::entity_list::EntityList;
     use crate::pos::Position;
 
@@ -789,6 +784,7 @@ mod cli {
             println!("No entity found with ID {}.", ent_id);
             return;
         };
+        println!("Jumping to {},{}", ent_pos.x, ent_pos.y);
         let res = actions::jump(entities.get_player_mut().unwrap(), ent_pos);
         if res.success {
             println!("Success. Used {} g of fuel", res.fuel_used);
@@ -852,7 +848,14 @@ mod cli {
             }
         };
         let destination = Position::new(x, y);
-        actions::jump(entities.get_player_mut().unwrap(), destination);
+        println!("Jumping to {},{}", x, y);
+        let res = actions::jump(entities.get_player_mut().unwrap(), destination);
+        if res.success {
+            println!("Success. Used {} g of fuel", res.fuel_used);
+            println!("Traveled {} ly", res.distance);
+        } else {
+            println!("Jump failed");
+        }
     }
 
     pub fn jump_check_man(cmd: Vec<&str>, entities: &EntityList) {
@@ -901,7 +904,14 @@ mod cli {
         };
         let ship = entities.get_player_mut().unwrap();
         let destination = Position::new(ship.pos.x + dx, ship.pos.y + dy);
-        actions::jump(ship, destination);
+        println!("Jumping to {},{}", destination.x, destination.y);
+        let res = actions::jump(ship, destination);
+        if res.success {
+            println!("Success. Used {} g of fuel", res.fuel_used);
+            println!("Traveled {} ly", res.distance);
+        } else {
+            println!("Jump failed");
+        }
     }
 
     pub fn jump_check_rel(cmd: Vec<&str>, entities: &EntityList) {
@@ -935,7 +945,6 @@ mod cli {
         ent.hold.print();
     }
 
-    use crate::entity::EntityClass;
     pub fn entities(cmd: Vec<&str>, entities: &EntityList) {
         cli_header("Entities List");
         let max_distance: i32;
@@ -955,15 +964,15 @@ mod cli {
         entities
             .list_by_distance(ent.pos, max_distance)
             .iter()
-            .for_each(|ent| {
-                let class_str = match ent.class {
+            .for_each(|target| {
+                let class_str = match target.class {
                     EntityClass::Station => "STAT",
                     EntityClass::Craft => "CRFT",
                 };
-                let distance = ent.pos.distance(&ent.pos);
+                let distance = ent.pos.distance(&target.pos);
                 println!(
                     "{:<6}: [{}] {:>5} ly - ({:>5}, {:>5}) - {}",
-                    ent.id, class_str, distance, ent.pos.x, ent.pos.y, ent.name
+                    target.id, class_str, distance, target.pos.x, target.pos.y, target.name
                 );
                 found += 1;
             });
