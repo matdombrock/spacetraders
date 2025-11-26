@@ -24,7 +24,7 @@ mod pos {
     }
     impl std::fmt::Display for Position {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "x:{}, y:{}", self.x, self.y)
+            write!(f, "X{} Y{}", self.x, self.y)
         }
     }
     impl Position {
@@ -323,6 +323,15 @@ mod jump_drive {
             res.fuel_used = fuel_needed;
             res
         }
+        pub fn refuel_amt(&self) -> i32 {
+            self.fuel_max - self.fuel_cur
+        }
+        pub fn refuel(&mut self, amount: i32) {
+            self.fuel_cur += amount;
+            if self.fuel_cur > self.fuel_max {
+                self.fuel_cur = self.fuel_max;
+            }
+        }
         pub fn print(&self) {
             println!("Jump Drive: {}/{}g", self.fuel_cur, self.fuel_max);
             println!("Max Range: {} ly", self.max_range);
@@ -330,6 +339,9 @@ mod jump_drive {
         }
         pub fn calc_fuel(&self, distance: i32) -> i32 {
             distance * self.fuel_per_ly
+        }
+        pub fn fuel_str(&self) -> String {
+            format!("{}/{} g", self.fuel_cur, self.fuel_max)
         }
         fn consume(&mut self, amount: i32) {
             self.fuel_cur -= amount;
@@ -369,6 +381,7 @@ mod entity {
     pub struct Entity {
         pub name: String,
         pub id: i32,
+        pub credits: i32,
         pub class: EntityClass,
         pub pos: pos::Position,
         pub hold: CargoHold,
@@ -382,6 +395,7 @@ mod entity {
             Entity {
                 name: name.to_string(),
                 id: 0, // Set my list.add
+                credits: 1000,
                 class: EntityClass::Craft,
                 pos: pos::Position::new(0, 0),
                 hold: CargoHold::new(1000),
@@ -529,7 +543,7 @@ mod input {
         let _ = rl.load_history("history.txt");
 
         // Read line with editing and history support
-        match rl.readline("> ") {
+        match rl.readline("Δ | ") {
             Ok(line) => {
                 let _ = rl.add_history_entry(line.as_str());
                 let _ = rl.save_history("history.txt");
@@ -559,8 +573,8 @@ mod actions {
         pub message: String,
     }
 
-    pub fn set_target(ship: &mut Entity, ent_id: i32) -> ARres {
-        ship.target_id = Some(ent_id);
+    pub fn set_target(player: &mut Entity, ent_id: i32) -> ARres {
+        player.target_id = Some(ent_id);
         ARres { success: true }
     }
 
@@ -571,12 +585,12 @@ mod actions {
         pub fuel_after: i32,
         pub can_jump: bool,
     }
-    pub fn jump_check(ent: &Entity, target: &Position) -> AResJumpCheck {
-        let distance = ent.pos.distance(target);
-        let fuel_needed = ent.jump_drive.calc_fuel(distance);
-        let fuel_cur = ent.jump_drive.fuel_cur;
+    pub fn jump_check(player: &Entity, target: &Position) -> AResJumpCheck {
+        let distance = player.pos.distance(target);
+        let fuel_needed = player.jump_drive.calc_fuel(distance);
+        let fuel_cur = player.jump_drive.fuel_cur;
         let fuel_after = fuel_cur - fuel_needed;
-        let can_jump = distance <= ent.jump_drive.max_range && fuel_needed <= fuel_cur;
+        let can_jump = distance <= player.jump_drive.max_range && fuel_needed <= fuel_cur;
         AResJumpCheck {
             distance,
             fuel_needed,
@@ -586,17 +600,17 @@ mod actions {
         }
     }
 
-    type AResJump = JumpRes;
-    pub fn jump(ent: &mut Entity, destination: Position) -> AResJump {
-        ent.jump(&destination)
+    pub type AResJump = JumpRes;
+    pub fn jump(player: &mut Entity, destination: &Position) -> AResJump {
+        player.jump(&destination)
     }
 
     pub struct AResEntList {
         pub entities: Vec<Entity>,
     }
-    pub fn dock_list(ship: &Entity, ent_list: &EntityList) -> AResEntList {
+    pub fn dock_list(player: &Entity, ent_list: &EntityList) -> AResEntList {
         let nearby_stations: Vec<&Entity> = ent_list
-            .list_by_distance(ship.pos, 1)
+            .list_by_distance(player.pos, 1)
             .into_iter()
             .filter(|ent| ent.flags.has_dock)
             .collect();
@@ -624,7 +638,6 @@ mod actions {
                 res.message = format!("Docked with {}.", target_name);
                 res.success = true;
                 ship.docked_to = Some(ent_id);
-                ship.target_id = Some(ent_id);
             } else {
                 res.message = format!("Docking failed: not close enough to {}.", target_name);
             }
@@ -634,14 +647,14 @@ mod actions {
         res
     }
 
-    pub fn undock(ent: &mut Entity) -> AResMsg {
+    pub fn undock(player: &mut Entity) -> AResMsg {
         let mut res = AResMsg {
             success: false,
             message: String::new(),
         };
-        if let Some(docked_id) = ent.docked_to {
+        if let Some(docked_id) = player.docked_to {
             res.message = format!("Undocked from entity ID {}.", docked_id);
-            ent.docked_to = None;
+            player.docked_to = None;
         } else {
             res.message = format!("Not currently docked to any entity.");
         }
@@ -681,6 +694,7 @@ mod actions {
 // Handle IO
 mod cli {
     use crate::actions;
+    use crate::entity::Entity;
     use crate::entity::EntityClass;
     use crate::entity_list::EntityList;
     use crate::pos::Position;
@@ -758,6 +772,20 @@ mod cli {
         println!("Position: {}", ent.pos);
     }
 
+    fn _jump(ent: &mut Entity, target: &Position) {
+        println!("Attempting jump to {}", target);
+        let res = actions::jump(ent, target);
+        if res.success {
+            println!("Jump successful.");
+            println!("Distance traveled: {} ly", res.distance);
+            println!("Fuel used: {} g", res.fuel_used);
+            println!("Current Fuel: {}", ent.jump_drive.fuel_str());
+            println!("New Position: {}", ent.pos);
+        } else {
+            println!("Jump failed: {}", res.message);
+        }
+    }
+
     pub fn jump(cmd: Vec<&str>, entities: &mut EntityList) {
         cli_header("Jump");
         if cmd.len() < 2 {
@@ -777,14 +805,7 @@ mod cli {
             println!("No entity found with ID {}.", ent_id);
             return;
         };
-        println!("Jumping to {},{}", ent_pos.x, ent_pos.y);
-        let res = actions::jump(entities.get_player_mut().unwrap(), ent_pos);
-        if res.success {
-            println!("Success. Used {} g of fuel", res.fuel_used);
-            println!("Traveled {} ly", res.distance);
-        } else {
-            println!("Jump failed");
-        }
+        _jump(entities.get_player_mut().unwrap(), &ent_pos);
     }
 
     pub fn jump_check(cmd: Vec<&str>, entities: &EntityList) {
@@ -841,14 +862,7 @@ mod cli {
             }
         };
         let destination = Position::new(x, y);
-        println!("Jumping to {},{}", x, y);
-        let res = actions::jump(entities.get_player_mut().unwrap(), destination);
-        if res.success {
-            println!("Success. Used {} g of fuel", res.fuel_used);
-            println!("Traveled {} ly", res.distance);
-        } else {
-            println!("Jump failed");
-        }
+        _jump(entities.get_player_mut().unwrap(), &destination);
     }
 
     pub fn jump_check_man(cmd: Vec<&str>, entities: &EntityList) {
@@ -897,14 +911,7 @@ mod cli {
         };
         let ship = entities.get_player_mut().unwrap();
         let destination = Position::new(ship.pos.x + dx, ship.pos.y + dy);
-        println!("Jumping to {},{}", destination.x, destination.y);
-        let res = actions::jump(ship, destination);
-        if res.success {
-            println!("Success. Used {} g of fuel", res.fuel_used);
-            println!("Traveled {} ly", res.distance);
-        } else {
-            println!("Jump failed");
-        }
+        _jump(ship, &destination);
     }
 
     pub fn jump_check_rel(cmd: Vec<&str>, entities: &EntityList) {
@@ -963,6 +970,11 @@ mod cli {
                     EntityClass::Craft => "CRFT",
                 };
                 let distance = ent.pos.distance(&target.pos);
+                if distance == 0 {
+                    print!("^^ ");
+                } else {
+                    print!("<< ");
+                }
                 println!(
                     "{:<6}: [{}] {:>5} ly - ({:>5}, {:>5}) - {}",
                     target.id, class_str, distance, target.pos.x, target.pos.y, target.name
@@ -999,7 +1011,12 @@ mod cli {
                 return;
             }
         };
-        actions::dock(entities, ent_id);
+        let res = actions::dock(entities, ent_id);
+        if res.success {
+            println!("Docked to: {}", ent_id);
+        } else {
+            println!("Docking failed: {}", res.message);
+        }
     }
 
     pub fn undock(cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1015,6 +1032,38 @@ mod cli {
         }
         let new_name = cmd[1..].join(" ");
         actions::name_ent(entities.get_player_mut().unwrap(), &new_name);
+    }
+
+    pub fn refuel(cmd: Vec<&str>, entities: &mut EntityList) {
+        cli_header("Refuel Ship");
+        let ship = entities.get_player_mut().unwrap();
+        // Check if docked
+        if ship.docked_to.is_none() {
+            println!("Must be docked to refuel.");
+            return;
+        }
+        let amt_needed = ship.jump_drive.refuel_amt();
+        if amt_needed == 0 {
+            println!("Jump drive is already full.");
+            return;
+        }
+        let cost_per_g = 2; // Example cost
+        let total_cost = amt_needed * cost_per_g;
+        if ship.credits < total_cost {
+            println!(
+                "Not enough credits to refuel. Need {}, have {}.",
+                total_cost, ship.credits
+            );
+            return;
+        }
+        ship.credits -= total_cost;
+        ship.jump_drive.refuel(amt_needed);
+        println!(
+            "Refueled {} g for {} credits. Current fuel: {}",
+            amt_needed,
+            total_cost,
+            ship.jump_drive.fuel_str()
+        );
     }
 
     pub fn save(cmd: Vec<&str>, entities: &EntityList) {
@@ -1142,6 +1191,9 @@ fn main() {
             }
             "undock" | "ud" => {
                 cli::undock(cmd, &mut entities);
+            }
+            "refuel" | "rf" => {
+                cli::refuel(cmd, &mut entities);
             }
             "name" => {
                 cli::name(cmd, &mut entities);
