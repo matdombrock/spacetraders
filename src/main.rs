@@ -17,7 +17,7 @@ mod pos {
     use rand::Rng;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
     pub struct Position {
         pub x: i32,
         pub y: i32,
@@ -331,21 +331,43 @@ mod entity {
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct EntityFlags {}
+    impl EntityFlags {
+        pub fn new() -> Self {
+            EntityFlags {}
+        }
+    }
+
+    #[derive(Hash, Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
+    pub enum EntityClass {
+        Station,
+        Craft,
+    }
+
+    pub static ENTITY_CLASSES: [EntityClass; 2] = [EntityClass::Station, EntityClass::Craft];
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Entity {
         pub name: String,
         pub id: i32,
+        pub class: EntityClass,
         pub pos: pos::Position,
         pub hold: CargoHold,
         pub jump_drive: JumpDrive,
+        pub flags: EntityFlags,
+        pub docked_to: Option<i32>,
     }
     impl Entity {
         pub fn new(name: &str) -> Self {
             Entity {
                 name: name.to_string(),
                 id: 0, // Set my list.add
+                class: EntityClass::Craft,
                 pos: pos::Position::new(0, 0),
                 hold: CargoHold::new(1000),
-                jump_drive: JumpDrive::new(10, 500),
+                jump_drive: JumpDrive::new(10, 100),
+                flags: EntityFlags::new(),
+                docked_to: None,
             }
         }
         pub fn set_pos(&mut self, position: pos::Position) {
@@ -364,10 +386,23 @@ mod entity {
 
 mod entity_maker {
     use crate::entity::Entity;
+    use crate::entity::EntityClass;
     use crate::pos::Position;
     use crate::univ::UNIV;
-    pub fn station() -> Entity {
-        let mut ent = Entity::new("Station");
+    use rand::Rng;
+    pub fn station(name_list: &Vec<String>) -> Entity {
+        fn random_name(station_names: &Vec<String>) -> String {
+            let mut rng = rand::rng();
+            let index1 = rng.random_range(0..station_names.len());
+            let index2 = rng.random_range(0..station_names.len());
+            let index3 = rng.random_range(0..station_names.len());
+            format!(
+                "{}-{}-{}",
+                station_names[index1], station_names[index2], station_names[index3]
+            )
+        }
+        let mut ent = Entity::new(random_name(name_list).as_str());
+        ent.class = EntityClass::Station;
         ent.set_pos(Position::random(UNIV.gal_size));
         ent
     }
@@ -376,6 +411,7 @@ mod entity_maker {
 mod entity_list {
     use crate::entity::Entity;
     use crate::entity_maker;
+    use crate::pos::Position;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -405,14 +441,31 @@ mod entity_list {
         pub fn get_by_id_mut(&mut self, id: i32) -> Option<&mut Entity> {
             self.entities.iter_mut().find(|ent| ent.id == id)
         }
-        pub fn generate_entities(&mut self, count: usize) {
+        pub fn generate_entities(&mut self, name_list: &Vec<String>, count: usize) {
             for i in 0..count {
-                let ent = entity_maker::station();
+                let ent = entity_maker::station(name_list);
                 self.add(ent);
+            }
+        }
+        pub fn get_player(&self) -> Option<&Entity> {
+            self.get(0)
+        }
+        pub fn get_player_mut(&mut self) -> Option<&mut Entity> {
+            self.get_mut(0)
+        }
+        pub fn set_player(&mut self, ship: Entity) {
+            if let Some(player) = self.get_mut(0) {
+                *player = ship;
             }
         }
         pub fn list(&self) -> Vec<&Entity> {
             self.entities.iter().collect()
+        }
+        pub fn list_by_distance(&self, origin: Position, max_distance: i32) -> Vec<&Entity> {
+            self.entities
+                .iter()
+                .filter(|ent| origin.distance(&ent.pos) <= max_distance)
+                .collect()
         }
         pub fn print(&self, ship: &Entity) {
             for (i, ent) in self.entities.iter().enumerate() {
@@ -451,17 +504,37 @@ mod input {
 
 mod cmds {
     use crate::entity::Entity;
-    pub fn status(ship: &Entity) {
+    pub fn status(ship: &Entity, ent_list: &EntityList) {
+        println!("Ship Name: {}", ship.name);
+        println!("Ship ID  : {}", ship.id);
+        println!("Ship Class: {:?}", ship.class);
+        let docked_ent = match ship.docked_to {
+            Some(id) => ent_list.get_by_id(id).map(|e| e.name.clone()),
+            None => None,
+        };
+        if let Some(docked_name) = docked_ent {
+            println!(
+                "Docked to: {} (ID {})",
+                docked_name,
+                ship.docked_to.unwrap()
+            );
+        } else {
+            println!("Docked to: None");
+        }
         ship.hold.print();
         ship.jump_drive.print();
         ship.pos.print();
     }
 
-    pub fn jump_to(ship: &mut Entity, ent_list: &EntityList, ent_id: i32) {
-        let ent = ent_list.get_by_id(ent_id);
-        if let Some(target) = ent {
-            if ship.jump_to(&target.pos) {
-                println!("Jumped to {}:", target.name);
+    pub fn jump_to(ent_list: &mut EntityList, ent_id: i32) {
+        if let Some(target) = ent_list.get_by_id(ent_id) {
+            // Clone/copy the needed data to end the immutable borrow
+            let target_pos = target.pos.clone();
+            let target_name = target.name.clone();
+
+            let ship = ent_list.get_player_mut().unwrap();
+            if ship.jump_to(&target_pos) {
+                println!("Jumped to {}:", target_name);
                 println!("Fuel remaining: {}g", ship.jump_drive.fuel_cur);
                 ship.pos.print();
             } else {
@@ -514,29 +587,92 @@ mod cmds {
         );
     }
 
+    use crate::entity::EntityClass;
     use crate::entity_list::EntityList;
     pub fn entities_list(list: &EntityList, ship: &Entity, max_distance: i32) {
         let mut found = 0;
-        list.list().iter().for_each(|ent| {
-            let distance = ship.pos.distance(&ent.pos);
-            if distance > max_distance {
-                return;
-            }
-            found += 1;
-            println!(
-                "{}: {} [{}] ({} {})",
-                ent.id, ent.name, distance, ent.pos.x, ent.pos.y
-            );
-        });
-        println!("total: {} entities within {} ly", found, max_distance);
+        list.list_by_distance(ship.pos, max_distance)
+            .iter()
+            .for_each(|ent| {
+                let class_str = match ent.class {
+                    EntityClass::Station => "STAT",
+                    EntityClass::Craft => "CRFT",
+                };
+                let distance = ship.pos.distance(&ent.pos);
+                println!(
+                    "{:<6}: [{}] {:<5} ly - ({:<5}, {:<5}) - {}",
+                    ent.id, class_str, distance, ent.pos.x, ent.pos.y, ent.name
+                );
+                found += 1;
+            });
+        println!("Found {} entities within {} ly", found, max_distance);
     }
 
     pub fn cargo_list(ent: &Entity) {
         ent.hold.print();
     }
+
+    pub fn dock_list(ship: &Entity, ent_list: &EntityList) {
+        let nearby_stations: Vec<&Entity> = ent_list
+            .list_by_distance(ship.pos, 1)
+            .into_iter()
+            .filter(|ent| ent.name.contains("Station"))
+            .collect();
+        if nearby_stations.is_empty() {
+            println!("No stations nearby to dock with.");
+        } else {
+            println!("Nearby Stations:");
+            for station in nearby_stations {
+                let distance = ship.pos.distance(&station.pos);
+                println!(
+                    "{}: {} [{}] ({} {})",
+                    station.id, station.name, distance, station.pos.x, station.pos.y
+                );
+            }
+        }
+    }
+
+    pub fn dock(ent_list: &mut EntityList, ent_id: i32) {
+        if let Some(target) = ent_list.get_by_id(ent_id) {
+            // Clone/copy the needed data to end the immutable borrow
+            let target_pos = target.pos.clone();
+            let target_name = target.name.clone();
+
+            let ship = ent_list.get_player_mut().unwrap();
+            if ship.pos.distance(&target_pos) <= 1 {
+                println!("Docked with {}.", target_name);
+                ship.docked_to = Some(ent_id);
+            } else {
+                println!("Docking failed: not close enough to {}.", target_name);
+            }
+        } else {
+            println!("No entity found with ID {}.", ent_id);
+        }
+    }
+
+    pub fn name_ent(ent: &mut Entity, new_name: &str) {
+        ent.name = new_name.to_string();
+        println!("Renamed to {}", ent.name);
+    }
+
+    pub fn save(entities: &EntityList, filename: &str) {
+        // Serialize entities to JSON and save to file
+        let serialized = serde_json::to_string_pretty(&entities).unwrap();
+        println!("Saving entities to {}...", filename);
+        std::fs::write(filename, serialized).expect("Unable to write file");
+    }
+
+    pub fn load(filename: &str) -> EntityList {
+        // Load entities from JSON file and deserialize
+        println!("Loading entities from {}...", filename);
+        let data = std::fs::read_to_string(filename).expect("Unable to read file");
+        let entities: EntityList = serde_json::from_str(&data).unwrap();
+        entities
+    }
 }
 
 use crate::entity::Entity;
+use crate::entity::EntityClass;
 use crate::entity_list::EntityList;
 use crate::input::prompt;
 use crate::item_name::ItemName;
@@ -545,23 +681,37 @@ use crate::univ::UNIV;
 use std::io::{self, Write};
 
 fn cmd_header(title: &str) {
-    println!("====================");
-    println!("== {:^14} ==", title.to_uppercase());
-    println!("====================");
+    println!("{}", "▀".repeat(64));
+    println!("██▀{:^57} ▄██", title.to_uppercase());
+    println!("{}", "▄".repeat(64));
+    println!();
 }
 
 fn main() {
+    // Load names from file (names.txt)
+    let mut name_list: Vec<String> = Vec::new();
+    if let Ok(contents) = std::fs::read_to_string("names.txt") {
+        for line in contents.lines() {
+            name_list.push(line.to_string());
+        }
+    } else {
+        // Exit
+        println!("Error: Unable to read names.txt");
+        return;
+    }
+
     let mut entities = EntityList::new();
 
-    let mut my_ship = Entity::new("My Ship");
-    my_ship.hold.insert(ItemName::MetalLow, 20);
-    my_ship.hold.insert(ItemName::CompositeMid, 15);
-    my_ship.hold.insert(ItemName::PolymerHigh, 5);
+    let mut start_ship = Entity::new("My Ship");
+    start_ship.class = EntityClass::Craft;
+    start_ship.hold.insert(ItemName::MetalLow, 20);
+    start_ship.hold.insert(ItemName::CompositeMid, 15);
+    start_ship.hold.insert(ItemName::PolymerHigh, 5);
     let gal_center = UNIV.gal_size / 2;
-    my_ship.set_pos(Position::new(gal_center, gal_center));
-    entities.add(my_ship.clone());
+    start_ship.set_pos(Position::new(gal_center, gal_center));
+    entities.add(start_ship.clone());
 
-    entities.generate_entities(UNIV.starting_entities as usize);
+    entities.generate_entities(&name_list, UNIV.starting_entities as usize);
 
     loop {
         let cmd_raw = prompt();
@@ -573,7 +723,7 @@ fn main() {
         match cmd[0] {
             "status" | "s" => {
                 cmd_header("Ship Status");
-                cmds::status(&my_ship);
+                cmds::status(entities.get_player().unwrap(), &entities);
             }
             "jump" | "j" => {
                 cmd_header("Jump");
@@ -588,11 +738,11 @@ fn main() {
                         continue;
                     }
                 };
-                cmds::jump_to(&mut my_ship, &entities, ent_id);
+                cmds::jump_to(&mut entities, ent_id);
             }
             "cargo" | "c" => {
                 cmd_header("Cargo Hold");
-                cmds::cargo_list(&my_ship);
+                cmds::cargo_list(entities.get_player().unwrap());
             }
             "jump_man" | "jm" => {
                 cmd_header("Jump (Manual)");
@@ -615,7 +765,7 @@ fn main() {
                     }
                 };
                 let destination = Position::new(x, y);
-                cmds::jump_man(&mut my_ship, destination);
+                cmds::jump_man(entities.get_player_mut().unwrap(), destination);
             }
             "jump_check" | "jc" => {
                 cmd_header("Jump Check");
@@ -630,7 +780,7 @@ fn main() {
                         continue;
                     }
                 };
-                cmds::jump_check(&my_ship, &entities, ent_id);
+                cmds::jump_check(entities.get_player().unwrap(), &entities, ent_id);
             }
             "jump_check_man" | "jcm" => {
                 cmd_header("Jump Check (Manual)");
@@ -653,13 +803,13 @@ fn main() {
                     }
                 };
                 let destination = Position::new(x, y);
-                cmds::jump_check_man(&my_ship, destination);
+                cmds::jump_check_man(entities.get_player().unwrap(), destination);
             }
             "entities" | "l" => {
                 cmd_header("Entities List");
                 let max_distance: i32;
                 if cmd.len() < 2 {
-                    max_distance = my_ship.jump_drive.max_range;
+                    max_distance = entities.get_player().unwrap().jump_drive.max_range;
                 } else {
                     max_distance = match cmd[1].parse() {
                         Ok(num) => num,
@@ -669,15 +819,62 @@ fn main() {
                         }
                     };
                 }
-                cmds::entities_list(&entities, &my_ship, max_distance);
+                cmds::entities_list(&entities, entities.get_player().unwrap(), max_distance);
+            }
+            "dock_list" | "dl" => {
+                cmd_header("Dock");
+                cmds::dock_list(entities.get_player().unwrap(), &entities);
+            }
+            "dock" | "d" => {
+                cmd_header("Docking");
+                if cmd.len() < 2 {
+                    println!("Usage: dock <entity_id>");
+                    continue;
+                }
+                let ent_id: i32 = match cmd[1].parse() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        println!("Invalid entity ID.");
+                        continue;
+                    }
+                };
+                cmds::dock(&mut entities, ent_id);
+            }
+            "name" => {
+                cmd_header("Rename Ship");
+                if cmd.len() < 2 {
+                    println!("Usage: name <new_name>");
+                    continue;
+                }
+                let new_name = cmd[1..].join(" ");
+                cmds::name_ent(entities.get_player_mut().unwrap(), &new_name);
+            }
+            "save" => {
+                cmd_header("Save Game");
+                let filename = if cmd.len() < 2 {
+                    "savegame.json"
+                } else {
+                    cmd[1]
+                };
+                cmds::save(&entities, filename);
+            }
+            "load" => {
+                cmd_header("Load Game");
+                let filename = if cmd.len() < 2 {
+                    "savegame.json"
+                } else {
+                    cmd[1]
+                };
+                entities = cmds::load(filename);
+                if let Some(ship) = entities.get_by_id_mut(0) {
+                    // my_ship = ship;
+                } else {
+                    println!("Warning: No ship found in loaded data.");
+                }
             }
             "quit" | "exit" | "q" => {
                 cmd_header("Goodbye");
                 println!("Exiting...");
-                // Serialize entities to JSON and save to file
-                let serialized = serde_json::to_string_pretty(&entities).unwrap();
-                println!("Saving entities to entities.json...");
-                std::fs::write("entities.json", serialized).expect("Unable to write file");
                 break;
             }
             _ => {
