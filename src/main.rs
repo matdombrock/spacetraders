@@ -10,8 +10,9 @@ mod ch {
 }
 
 mod fmt {
+    use colored::*;
     pub fn credit(amount: &i32) -> String {
-        format!("⧫{}", amount)
+        format!("◆{}", amount).magenta().to_string()
     }
     pub fn peice(amount: &i32) -> String {
         format!("{}pc", amount)
@@ -1419,7 +1420,7 @@ mod cli {
             self.print_ent_line(ent.id, entities);
 
             let hold = &ent.hold;
-            println!("Cargo Hold: {}/{}", hold.vol, hold.vol_max);
+            println!("Volume: {}/{}", hold.vol, hold.vol_max);
             println!("-------");
 
             // Sort alphabetically by fname
@@ -1433,8 +1434,8 @@ mod cli {
                 let meta = ILM.get_by_enum(item).unwrap();
                 let price = prices.get(item).unwrap_or(&0);
                 println!(
-                    "{}:{:<24}: {} - {}",
-                    meta.sname.green(),
+                    "{}|{:<24}: {:>8} - {}",
+                    meta.sname.to_uppercase().green(),
                     meta.fname,
                     fmt::peice(qty),
                     fmt::credit(price)
@@ -1696,9 +1697,9 @@ use crate::univ::UNIV;
 use std::io::{self, Write};
 
 fn main() {
-    // Load names from file (names.txt)
+    // Load names from file (res/names.txt)
     let mut name_list: Vec<String> = Vec::new();
-    if let Ok(contents) = std::fs::read_to_string("names.txt") {
+    if let Ok(contents) = std::fs::read_to_string("res/names.txt") {
         for line in contents.lines() {
             name_list.push(line.to_string());
         }
