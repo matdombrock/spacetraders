@@ -9,6 +9,24 @@ mod ch {
     pub static SP1: &str = "⏣";
 }
 
+mod fmt {
+    pub fn credit(amount: &i32) -> String {
+        format!("⧫{}", amount)
+    }
+    pub fn peice(amount: &i32) -> String {
+        format!("{}pc", amount)
+    }
+    pub fn fuel(amount: &i32) -> String {
+        format!("{}g", amount)
+    }
+    pub fn distance(amount: &i32) -> String {
+        format!("{}ly", amount)
+    }
+    pub fn ent_id(ent_id: &i32) -> String {
+        format!("#{}", ent_id)
+    }
+}
+
 // Universal constants
 mod univ {
     pub struct Univ {
@@ -102,7 +120,7 @@ mod item_meta {
             map.insert(
                 ItemName::MetalLow,
                 ItemMeta {
-                    fname: "Metal (low grade)".to_string(),
+                    fname: "Metals (low grade)".to_string(),
                     vol_pc: 10,
                     base_val: 10,
                     rarity: 1,
@@ -422,8 +440,8 @@ mod entity {
         pub hold: CargoHold,
         pub jump_drive: JumpDrive,
         pub flags: EntityFlags,
-        pub docked_to: Option<i32>,
-        pub target_id: Option<i32>,
+        pub docked_id: Option<i32>,
+        pub targeting_id: Option<i32>,
     }
     impl Entity {
         pub fn new(name: &str) -> Self {
@@ -436,8 +454,8 @@ mod entity {
                 hold: CargoHold::new(1000),
                 jump_drive: JumpDrive::new(10, 100),
                 flags: EntityFlags::new(),
-                docked_to: None,
-                target_id: None,
+                docked_id: None,
+                targeting_id: None,
             }
         }
         pub fn set_pos(&mut self, position: pos::Position) {
@@ -446,7 +464,7 @@ mod entity {
         pub fn jump(&mut self, destination: &pos::Position) -> JumpRes {
             // Check if docked
             let mut res = JumpRes::new();
-            if self.docked_to.is_some() {
+            if self.docked_id.is_some() {
                 res.success = false;
                 res.message = "Cannot jump while docked.".to_string();
                 return res;
@@ -528,8 +546,8 @@ mod entity_list {
             self.entities.push(entity);
             self.id_acc += 1;
         }
-        pub fn get(&self, index: usize) -> Option<&Entity> {
-            self.entities.get(index)
+        pub fn get(&self, index: i32) -> Option<&Entity> {
+            self.entities.get(index as usize)
         }
         pub fn get_mut(&mut self, index: usize) -> Option<&mut Entity> {
             self.entities.get_mut(index)
@@ -649,7 +667,7 @@ mod gm {
             GM { tick: 0 }
         }
         pub fn set_target(&self, player: &mut Entity, ent_id: i32) -> GMRes {
-            player.target_id = Some(ent_id);
+            player.targeting_id = Some(ent_id);
             GMRes { success: true }
         }
 
@@ -703,7 +721,7 @@ mod gm {
                 if ship.pos.distance(&target_pos) <= 1 {
                     res.message = format!("Docked with {}.", target_name);
                     res.success = true;
-                    ship.docked_to = Some(ent_id);
+                    ship.docked_id = Some(ent_id);
                 } else {
                     res.message = format!("Docking failed: not close enough to {}.", target_name);
                 }
@@ -718,9 +736,9 @@ mod gm {
                 success: false,
                 message: String::new(),
             };
-            if let Some(docked_id) = player.docked_to {
+            if let Some(docked_id) = player.docked_id {
                 res.message = format!("Undocked from entity ID {}.", docked_id);
-                player.docked_to = None;
+                player.docked_id = None;
             } else {
                 res.message = format!("Not currently docked to any entity.");
             }
@@ -760,7 +778,6 @@ mod gm {
 // CLI functions call actions::
 // Handle IO
 mod cli {
-    use crate::ch;
     use crate::entity_list::EntityList;
     use crate::gm::GM;
     use crate::item_meta::ILM;
@@ -769,6 +786,7 @@ mod cli {
         ItemName,
         entity::{Entity, EntityClass},
     };
+    use crate::{ch, fmt};
     use colored::*;
     use std::collections::HashMap;
 
@@ -901,7 +919,7 @@ mod cli {
             CmdMeta {
                 full: "cargo",
                 short: "c",
-                params: "ent_id",
+                params: "ent_id?",
                 desc: "View cargo hold contents.",
             },
         );
@@ -1051,7 +1069,7 @@ mod cli {
         pub fn help(&self, cmd: Vec<&str>) {
             fn print_full(cmd: &CmdMeta) {
                 print!("{} {}", cmd.full.green(), cmd.params.yellow());
-                println!(" | {}", cmd.short.blue());
+                println!(" | {}", cmd.short.green());
                 println!("-- {}", cmd.desc);
             }
             CLI::cli_header("Help");
@@ -1103,7 +1121,7 @@ mod cli {
             CLI::cli_header("Target");
             let ship = entities.get_player_mut().unwrap();
             if cmd.len() < 2 {
-                if let Some(target_id) = ship.target_id {
+                if let Some(target_id) = ship.targeting_id {
                     println!("Current target ID: {}", target_id);
                 } else {
                     println!("No target set.");
@@ -1127,46 +1145,63 @@ mod cli {
 
         pub fn scan(&mut self, cmd: Vec<&str>, entities: &EntityList) {
             CLI::cli_header("Scan Report");
-            let mut ent = entities.get_player().unwrap();
+            let mut scan_target = entities.get_player().unwrap();
             if cmd.len() == 1 {
-                ent = entities.get_player().unwrap();
+                scan_target = entities.get_player().unwrap();
             } else if cmd.len() == 2 {
-                let ent_id: i32 = match cmd[1].parse() {
+                let scan_target_id: i32 = match cmd[1].parse() {
                     Ok(num) => num,
                     Err(_) => {
                         println!("Invalid entity ID.");
                         return;
                     }
                 };
-                if let Some(_ent) = entities.get_by_id(ent_id) {
-                    ent = _ent;
+                if let Some(_ent) = entities.get_by_id(scan_target_id) {
+                    scan_target = _ent;
                 } else {
-                    println!("No entity found with ID {}.", ent_id);
+                    println!("No entity found with ID {}.", scan_target_id);
                 }
             } else {
                 println!("Usage: scan [<entity_id>]");
             }
 
-            self.print_ent_line(ent.id, entities);
+            self.print_ent_line(scan_target.id, entities);
 
-            println!("Name: {}", ent.name);
-            println!("ID  : {}", ent.id);
-            println!("Credits: {}", ent.fin.credits);
-            println!("Class: {:?}", ent.class);
-            println!("Targeting: {:?}", ent.target_id);
-            let docked_ent = match ent.docked_to {
-                Some(id) => entities.get_by_id(id).map(|e| e.name.clone()),
-                none => None,
+            // Get the current target of the scan target
+            let targeting_id = match scan_target.targeting_id {
+                Some(id) => id,
+                None => -1,
             };
-            if let Some(docked_name) = docked_ent {
-                println!("Docked to: {} (ID {})", docked_name, ent.docked_to.unwrap());
+            let targeting_str = if targeting_id == -1 {
+                "None".to_string()
             } else {
-                println!("Docked to: None");
-            }
-            ent.jump_drive.print();
-            println!("Position: {}", ent.pos);
+                fmt::ent_id(&targeting_id)
+            };
 
-            self.last_id = ent.id;
+            // Check if the scan target is docked
+            let docked_id = match scan_target.docked_id {
+                Some(id) => id,
+                none => -1,
+            };
+            let docked_str = if docked_id == -1 {
+                "None".to_string()
+            } else {
+                fmt::ent_id(&docked_id)
+            };
+
+            println!("{:<12}: {}", "Name", scan_target.name);
+            println!("{:<12}: {:?}", "Class", scan_target.class);
+            println!(
+                "{:<12}: {}",
+                "Credits",
+                fmt::credit(&scan_target.fin.credits)
+            );
+            println!("{:<12}: {}", "Targeting", targeting_str);
+            println!("{:<12}: {}", "Docked to", docked_str);
+
+            println!("{:<12}: {}", "Position", scan_target.pos);
+
+            self.last_id = scan_target.id;
         }
 
         pub fn jump(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1333,7 +1368,25 @@ mod cli {
 
         pub fn cargo(&self, cmd: Vec<&str>, entities: &EntityList) {
             CLI::cli_header("Cargo Hold");
-            let ent: &Entity = entities.get_player().unwrap();
+
+            // Default to player entity
+            let mut ent: &Entity = entities.get_player().unwrap();
+
+            // Override with specified entity ID
+            if cmd.len() > 1 {
+                let ent_id: i32 = match cmd[1].parse() {
+                    Ok(num) => num,
+                    Err(_) => {
+                        println!("Invalid entity ID.");
+                        return;
+                    }
+                };
+                if let Some(_ent) = entities.get_by_id(ent_id) {
+                    ent = _ent;
+                } else {
+                    println!("No entity found with ID {}.", ent_id);
+                }
+            }
 
             self.print_ent_line(ent.id, entities);
 
@@ -1347,9 +1400,16 @@ mod cli {
                 let meta = ILM.get_by_enum(item).unwrap();
                 meta.fname.clone()
             });
+            let prices = &ent.fin.prices;
             for (item, qty) in items {
                 let meta = ILM.get_by_enum(item).unwrap();
-                println!("{:<24}: {}", meta.fname, qty);
+                let price = prices.get(item).unwrap_or(&0);
+                println!(
+                    "{:<24}: {} - {}",
+                    meta.fname,
+                    fmt::peice(qty),
+                    fmt::credit(price)
+                );
             }
         }
 
@@ -1366,7 +1426,13 @@ mod cli {
                     return;
                 }
             };
-            let item = ILM.get_by_str(cmd[2]).unwrap();
+            let item = match ILM.get_by_str(cmd[2]) {
+                Some(it) => it,
+                None => {
+                    println!("Invalid item name: '{}'", cmd[2]);
+                    return;
+                }
+            };
             let qty: i32 = match cmd[3].parse() {
                 Ok(num) => num,
                 Err(_) => {
@@ -1374,7 +1440,23 @@ mod cli {
                     return;
                 }
             };
-            println!("Buying {} of {} from entity ID {}", qty, item.fname, ent_id);
+            // Check distance from player to ent, must be within 1 ly
+            let player = entities.get_player().unwrap();
+            let ent = entities.get(ent_id).unwrap();
+            let distance = player.pos.distance(&ent.pos);
+            if distance > 0 {
+                println!("Too far to trade!");
+                return;
+            }
+            // Station require docking to trade
+            if ent.class == EntityClass::Station && player.docked_id != Some(ent.id) {
+                println!("Must be docked to trade with a station");
+                return;
+            }
+            println!(
+                "Bought {}pc of {} from entity ID {}",
+                qty, item.fname, ent_id
+            );
         }
 
         pub fn sell(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1485,7 +1567,7 @@ mod cli {
             CLI::cli_header("Refuel Ship");
             let ship = entities.get_player_mut().unwrap();
             // Check if docked
-            if ship.docked_to.is_none() {
+            if ship.docked_id.is_none() {
                 println!("Must be docked to refuel.");
                 return;
             }
@@ -1616,7 +1698,7 @@ fn main() {
         println!();
         let mut cmd_raw = prompt();
         // Replace "@" with current target ID
-        if let Some(target_id) = entities.get_player().unwrap().target_id {
+        if let Some(target_id) = entities.get_player().unwrap().targeting_id {
             cmd_raw = cmd_raw.replace("@", &target_id.to_string());
         }
         // Replace # with last used ID
