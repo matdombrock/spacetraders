@@ -571,8 +571,8 @@ mod entity_list {
         pub fn get(&self, index: i32) -> Option<&Entity> {
             self.entities.get(index as usize)
         }
-        pub fn get_mut(&mut self, index: usize) -> Option<&mut Entity> {
-            self.entities.get_mut(index)
+        pub fn get_mut(&mut self, index: i32) -> Option<&mut Entity> {
+            self.entities.get_mut(index as usize)
         }
         pub fn get_by_id(&self, id: i32) -> Option<&Entity> {
             self.entities.iter().find(|ent| ent.id == id)
@@ -654,8 +654,9 @@ mod input {
 // Galaxy Manager
 mod gm {
 
-    use crate::entity::Entity;
+    use crate::entity::{Entity, EntityClass};
     use crate::entity_list::EntityList;
+    use crate::item_meta::ItemMeta;
     use crate::jump_drive::JumpRes;
     use crate::pos::Position;
 
@@ -676,9 +677,15 @@ mod gm {
         pub can_jump: bool,
     }
 
+    // GMResJump is an alias for JumpRes
     pub type GMResJump = JumpRes;
     pub struct GMResEntList {
         pub entities: Vec<Entity>,
+    }
+
+    pub struct GMResBuy {
+        pub success: bool,
+        pub message: String,
     }
 
     pub struct GM {
@@ -772,6 +779,37 @@ mod gm {
             GMResMsg {
                 success: true,
                 message: format!("Renamed to {}", ent.name),
+            }
+        }
+
+        pub fn buy(
+            &self,
+            entities: &EntityList,
+            buyer_id: i32,
+            seller_id: i32,
+            item: &ItemMeta,
+            qty: i32,
+        ) -> GMResBuy {
+            let buyer = entities.get_by_id(buyer_id).unwrap();
+            let seller = entities.get_by_id(seller_id).unwrap();
+            // Must be at same position to trade
+            let distance = buyer.pos.distance(&seller.pos);
+            if distance > 0 {
+                return GMResBuy {
+                    success: false,
+                    message: format!("Cannot trade: buyer is {} away from seller", distance),
+                };
+            }
+            // Station require docking to trade
+            if seller.class == EntityClass::Station && buyer.docked_id != Some(seller.id) {
+                return GMResBuy {
+                    success: false,
+                    message: format!("Cannot trade: buyer is not docked to seller"),
+                };
+            }
+            GMResBuy {
+                success: true,
+                message: "ok".to_string(),
             }
         }
 
@@ -1474,21 +1512,19 @@ mod cli {
             };
             // Check distance from player to ent, must be within 1 ly
             let player = entities.get_player().unwrap();
-            let ent = entities.get(ent_id).unwrap();
-            let distance = player.pos.distance(&ent.pos);
-            if distance > 0 {
-                println!("Too far to trade!");
-                return;
+            let seller = entities.get(ent_id).unwrap();
+            let res = self.gm.buy(entities, player.id, seller.id, item, qty);
+            if res.success {
+                println!("Purchase successful.");
+                println!(
+                    "Bought {} of {} from {}.",
+                    fmt::peice(&qty),
+                    item.fname,
+                    seller.name
+                );
+            } else {
+                println!("{}", res.message);
             }
-            // Station require docking to trade
-            if ent.class == EntityClass::Station && player.docked_id != Some(ent.id) {
-                println!("Must be docked to trade with a station");
-                return;
-            }
-            println!(
-                "Bought {}pc of {} from entity ID {}",
-                qty, item.fname, ent_id
-            );
         }
 
         pub fn sell(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
