@@ -107,6 +107,7 @@ mod item_meta {
     #[derive(Debug)]
     pub struct ItemMeta {
         pub fname: String,
+        pub sname: String, // Should be 4 chars or less
         pub vol_pc: i32,
         pub base_val: i32,
         pub rarity: i32, // 1-100
@@ -121,6 +122,7 @@ mod item_meta {
                 ItemName::MetalLow,
                 ItemMeta {
                     fname: "Metals (low grade)".to_string(),
+                    sname: "mtll".to_string(),
                     vol_pc: 10,
                     base_val: 10,
                     rarity: 1,
@@ -130,6 +132,7 @@ mod item_meta {
                 ItemName::MetalMid,
                 ItemMeta {
                     fname: "Metals (mid grade)".to_string(),
+                    sname: "mtlm".to_string(),
                     vol_pc: 20,
                     base_val: 20,
                     rarity: 2,
@@ -139,6 +142,7 @@ mod item_meta {
                 ItemName::MetalHigh,
                 ItemMeta {
                     fname: "Metals (high grade)".to_string(),
+                    sname: "mtlh".to_string(),
                     vol_pc: 30,
                     base_val: 30,
                     rarity: 3,
@@ -148,6 +152,7 @@ mod item_meta {
                 ItemName::CompositeLow,
                 ItemMeta {
                     fname: "Composites (low grade)".to_string(),
+                    sname: "cmpl".to_string(),
                     vol_pc: 15,
                     base_val: 25,
                     rarity: 10,
@@ -157,6 +162,7 @@ mod item_meta {
                 ItemName::CompositeMid,
                 ItemMeta {
                     fname: "Composites (mid grade)".to_string(),
+                    sname: "cmpm".to_string(),
                     vol_pc: 25,
                     base_val: 35,
                     rarity: 20,
@@ -166,6 +172,7 @@ mod item_meta {
                 ItemName::CompositeHigh,
                 ItemMeta {
                     fname: "Composites (high grade)".to_string(),
+                    sname: "cmph".to_string(),
                     vol_pc: 35,
                     base_val: 45,
                     rarity: 30,
@@ -175,6 +182,7 @@ mod item_meta {
                 ItemName::PolymerLow,
                 ItemMeta {
                     fname: "Polymers (low grade)".to_string(),
+                    sname: "plyl".to_string(),
                     vol_pc: 12,
                     base_val: 20,
                     rarity: 10,
@@ -184,6 +192,7 @@ mod item_meta {
                 ItemName::PolymerMid,
                 ItemMeta {
                     fname: "Polymers (mid grade)".to_string(),
+                    sname: "plym".to_string(),
                     vol_pc: 22,
                     base_val: 30,
                     rarity: 20,
@@ -193,6 +202,7 @@ mod item_meta {
                 ItemName::PolymerHigh,
                 ItemMeta {
                     fname: "Polymers (high grade)".to_string(),
+                    sname: "plyh".to_string(),
                     vol_pc: 32,
                     base_val: 40,
                     rarity: 30,
@@ -200,12 +210,23 @@ mod item_meta {
             );
             InvListMeta(map)
         }
+        // Get item meta by enum
         pub fn get_by_enum(&self, item: &ItemName) -> Option<&ItemMeta> {
             self.0.get(item)
         }
+        // Get item meta by string representation of enum
         pub fn get_by_str(&self, item_str: &str) -> Option<&ItemMeta> {
             for (item_enum, meta) in self.0.iter() {
                 if format!("{:?}", item_enum).to_lowercase() == item_str.to_lowercase() {
+                    return Some(meta);
+                }
+            }
+            None
+        }
+        // Get item meta by short name
+        pub fn get_by_sname(&self, sname: &str) -> Option<&ItemMeta> {
+            for (_, meta) in self.0.iter() {
+                if meta.sname.to_lowercase() == sname.to_lowercase() {
                     return Some(meta);
                 }
             }
@@ -1033,7 +1054,7 @@ mod cli {
         pub gm: GM,
     }
     impl CLI {
-        // Meta
+        // Util
 
         pub fn new() -> Self {
             CLI {
@@ -1057,6 +1078,13 @@ mod cli {
         fn print_ent_line(&self, ent_id: i32, ent_list: &EntityList) {
             let ent_str = self.ent_line_str(ent_id, ent_list);
             println!("{}{:^62}{}", ch::ARL, ent_str, ch::ARR);
+        }
+
+        fn set_last_id(&mut self, ent_id: i32) {
+            if ent_id < 0 {
+                return;
+            }
+            self.last_id = ent_id;
         }
 
         // Commands
@@ -1140,7 +1168,7 @@ mod cli {
             self.print_ent_line(ent_id, entities);
             println!("Target set to entity ID {}", ent_id);
 
-            self.last_id = ent_id;
+            self.set_last_id(ent_id);
         }
 
         pub fn scan(&mut self, cmd: Vec<&str>, entities: &EntityList) {
@@ -1201,7 +1229,7 @@ mod cli {
 
             println!("{:<12}: {}", "Position", scan_target.pos);
 
-            self.last_id = scan_target.id;
+            self.set_last_id(scan_target.id);
         }
 
         pub fn jump(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1228,7 +1256,7 @@ mod cli {
 
             self._jump(entities.get_player_mut().unwrap(), &ent_pos);
 
-            self.last_id = ent_id;
+            self.set_last_id(ent_id);
         }
 
         pub fn jump_check(&mut self, cmd: Vec<&str>, entities: &EntityList) {
@@ -1264,7 +1292,7 @@ mod cli {
                 println!("Jump is NOT possible.");
             }
 
-            self.last_id = ent_id;
+            self.set_last_id(ent_id);
         }
 
         pub fn jump_man(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1366,7 +1394,7 @@ mod cli {
             self.gm.jump_check(ship, &destination);
         }
 
-        pub fn cargo(&self, cmd: Vec<&str>, entities: &EntityList) {
+        pub fn cargo(&mut self, cmd: Vec<&str>, entities: &EntityList) {
             CLI::cli_header("Cargo Hold");
 
             // Default to player entity
@@ -1405,12 +1433,15 @@ mod cli {
                 let meta = ILM.get_by_enum(item).unwrap();
                 let price = prices.get(item).unwrap_or(&0);
                 println!(
-                    "{:<24}: {} - {}",
+                    "{}:{:<24}: {} - {}",
+                    meta.sname.green(),
                     meta.fname,
                     fmt::peice(qty),
                     fmt::credit(price)
                 );
             }
+
+            self.set_last_id(ent.id);
         }
 
         pub fn buy(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
@@ -1426,10 +1457,10 @@ mod cli {
                     return;
                 }
             };
-            let item = match ILM.get_by_str(cmd[2]) {
+            let item = match ILM.get_by_sname(cmd[2]) {
                 Some(it) => it,
                 None => {
-                    println!("Invalid item name: '{}'", cmd[2]);
+                    println!("Invalid item sname: '{}'", cmd[2]);
                     return;
                 }
             };
@@ -1539,7 +1570,7 @@ mod cli {
                 println!("Docking failed: {}", res.message);
             }
 
-            self.last_id = ent_id;
+            self.set_last_id(ent_id);
         }
 
         pub fn undock(&self, cmd: Vec<&str>, entities: &mut EntityList) {
