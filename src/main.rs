@@ -2,17 +2,26 @@
 #![allow(dead_code)]
 
 mod ch {
+    // TODO:
+    // Should use nerd fonts for arrows and symbols
+    // Unicode may render differently on different systems
+    // Sometimes as emojis, sometimes as plain text
     pub static ARL: &str = "⮜";
     pub static ARR: &str = "⮞";
     pub static ARU: &str = "⮝";
     pub static ARD: &str = "⮟";
     pub static SP1: &str = "⏣";
+    pub static ERR: &str = "✖";
+    pub static SUC: &str = "✔";
+    pub static CRD: &str = "◆";
 }
 
 mod fmt {
+    use crate::ch;
     use colored::*;
+
     pub fn credit(amount: &i32) -> String {
-        format!("◆{}", amount).magenta().to_string()
+        format!("{}{}", ch::CRD, amount).magenta().to_string()
     }
     pub fn peice(amount: &i32) -> String {
         format!("{}pc", amount)
@@ -660,16 +669,26 @@ mod gm {
     use crate::jump_drive::JumpRes;
     use crate::pos::Position;
 
+    #[derive(Debug, PartialEq, Clone)]
+    pub enum GMRS {
+        Success,
+        Failure, // Generic failure
+        TooFar,
+        NotDocked,
+        NotEnoughFuel,
+    }
+
     pub struct GMRes {
-        pub success: bool,
+        pub status: GMRS,
     }
 
     pub struct GMResMsg {
-        pub success: bool,
+        pub status: GMRS,
         pub message: String,
     }
 
     pub struct GMResJumpCheck {
+        pub status: GMRS,
         pub distance: i32,
         pub fuel_needed: i32,
         pub fuel_cur: i32,
@@ -677,6 +696,7 @@ mod gm {
         pub can_jump: bool,
     }
 
+    // FIXME: THIS NEEDS TO USE GMRS
     // GMResJump is an alias for JumpRes
     pub type GMResJump = JumpRes;
     pub struct GMResEntList {
@@ -684,7 +704,7 @@ mod gm {
     }
 
     pub struct GMResBuy {
-        pub success: bool,
+        pub status: GMRS,
         pub message: String,
     }
 
@@ -697,7 +717,9 @@ mod gm {
         }
         pub fn set_target(&self, player: &mut Entity, ent_id: i32) -> GMRes {
             player.targeting_id = Some(ent_id);
-            GMRes { success: true }
+            GMRes {
+                status: GMRS::Success,
+            }
         }
 
         pub fn jump_check(&self, player: &Entity, target: &Position) -> GMResJumpCheck {
@@ -707,6 +729,7 @@ mod gm {
             let fuel_after = fuel_cur - fuel_needed;
             let can_jump = distance <= player.jump_drive.max_range && fuel_needed <= fuel_cur;
             GMResJumpCheck {
+                status: GMRS::Success,
                 distance,
                 fuel_needed,
                 fuel_cur,
@@ -715,6 +738,7 @@ mod gm {
             }
         }
 
+        // FIXME: THIS NEEDS TO USE GMRS
         pub fn jump(&mut self, player: &mut Entity, destination: &Position) -> GMResJump {
             self.tick += 1;
             player.jump(&destination)
@@ -733,7 +757,7 @@ mod gm {
 
         pub fn dock(&self, ent_list: &mut EntityList, ent_id: i32) -> GMResMsg {
             let mut res = GMResMsg {
-                success: false,
+                status: GMRS::Failure,
                 message: String::new(),
             };
             if let Some(target) = ent_list.get_by_id(ent_id) {
@@ -748,8 +772,8 @@ mod gm {
 
                 let ship = ent_list.get_player_mut().unwrap();
                 if ship.pos.distance(&target_pos) <= 1 {
+                    res.status = GMRS::Success;
                     res.message = format!("Docked with {}.", target_name);
-                    res.success = true;
                     ship.docked_id = Some(ent_id);
                 } else {
                     res.message = format!("Docking failed: not close enough to {}.", target_name);
@@ -762,7 +786,7 @@ mod gm {
 
         pub fn undock(&self, player: &mut Entity) -> GMResMsg {
             let mut res = GMResMsg {
-                success: false,
+                status: GMRS::Success,
                 message: String::new(),
             };
             if let Some(docked_id) = player.docked_id {
@@ -777,7 +801,7 @@ mod gm {
         pub fn name_ent(&self, ent: &mut Entity, new_name: &str) -> GMResMsg {
             ent.name = new_name.to_string();
             GMResMsg {
-                success: true,
+                status: GMRS::Success,
                 message: format!("Renamed to {}", ent.name),
             }
         }
@@ -796,19 +820,19 @@ mod gm {
             let distance = buyer.pos.distance(&seller.pos);
             if distance > 0 {
                 return GMResBuy {
-                    success: false,
+                    status: GMRS::TooFar,
                     message: format!("Cannot trade: buyer is {} away from seller", distance),
                 };
             }
             // Station require docking to trade
             if seller.class == EntityClass::Station && buyer.docked_id != Some(seller.id) {
                 return GMResBuy {
-                    success: false,
+                    status: GMRS::NotDocked,
                     message: format!("Cannot trade: buyer is not docked to seller"),
                 };
             }
             GMResBuy {
-                success: true,
+                status: GMRS::Success,
                 message: "ok".to_string(),
             }
         }
@@ -818,7 +842,7 @@ mod gm {
             let serialized = serde_json::to_string_pretty(&entities).unwrap();
             std::fs::write(filename, serialized).expect("Unable to write file");
             GMResMsg {
-                success: true,
+                status: GMRS::Success,
                 message: format!("Saved to {}", filename),
             }
         }
@@ -828,7 +852,7 @@ mod gm {
             let data = std::fs::read_to_string(filename).expect("Unable to read file");
             *entities = serde_json::from_str(&data).unwrap();
             GMResMsg {
-                success: true,
+                status: GMRS::Success,
                 message: "loaded".to_string(),
             }
         }
@@ -839,7 +863,7 @@ mod gm {
 // Handle IO
 mod cli {
     use crate::entity_list::EntityList;
-    use crate::gm::GM;
+    use crate::gm::{GM, GMRS};
     use crate::item_meta::ILM;
     use crate::pos::Position;
     use crate::{
@@ -1126,6 +1150,21 @@ mod cli {
             self.last_id = ent_id;
         }
 
+        // TODO:
+        // Should error and success messages be handled here?
+        // Should they really be self methods? Or free functions?
+        // Alternatively, should they be part of fmt::?
+
+        // Print an error message
+        fn err(&self, msg: &str) {
+            println!("{} {}", ch::ERR, msg.red());
+        }
+
+        // Print a success message
+        fn suc(&self, msg: &str) {
+            println!("{} {}", ch::SUC, msg.green());
+        }
+
         // Commands
 
         pub fn intro(&self) {
@@ -1191,14 +1230,14 @@ mod cli {
                 if let Some(target_id) = ship.targeting_id {
                     println!("Current target ID: {}", target_id);
                 } else {
-                    println!("No target set.");
+                    self.err("No target set.");
                 }
                 return;
             }
             let ent_id: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid entity ID.");
+                    self.err("Invalid entity ID.");
                     return;
                 }
             };
@@ -1219,17 +1258,17 @@ mod cli {
                 let scan_target_id: i32 = match cmd[1].parse() {
                     Ok(num) => num,
                     Err(_) => {
-                        println!("Invalid entity ID.");
+                        self.err("Invalid entity ID.");
                         return;
                     }
                 };
                 if let Some(_ent) = entities.get_by_id(scan_target_id) {
                     scan_target = _ent;
                 } else {
-                    println!("No entity found with ID {}.", scan_target_id);
+                    self.err(format!("No entity found with ID {}.", scan_target_id).as_str());
                 }
             } else {
-                println!("Usage: scan [<entity_id>]");
+                self.err("Usage: scan [<entity_id>]");
             }
 
             self.print_ent_line(scan_target.id, entities);
@@ -1274,20 +1313,20 @@ mod cli {
         pub fn jump(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
             CLI::cli_header("Jump");
             if cmd.len() < 2 {
-                println!("Usage: jump <entity_id>");
+                self.err("Usage: jump <entity_id>");
                 return;
             }
             let ent_id: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid entity ID.");
+                    self.err("Invalid entity ID.");
                     return;
                 }
             };
             let ent_pos = if let Some(target) = entities.get_by_id(ent_id) {
                 target.pos.clone()
             } else {
-                println!("No entity found with ID {}.", ent_id);
+                self.err(format!("No entity found with ID {}.", ent_id).as_str());
                 return;
             };
 
@@ -1301,13 +1340,13 @@ mod cli {
         pub fn jump_check(&mut self, cmd: Vec<&str>, entities: &EntityList) {
             CLI::cli_header("Jump Check");
             if cmd.len() < 2 {
-                println!("Usage: jump_check <entity_id>");
+                self.err("Usage: jump_check <entity_id>");
                 return;
             }
             let ent_id: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid entity ID.");
+                    self.err("Invalid entity ID.");
                     return;
                 }
             };
@@ -1320,15 +1359,15 @@ mod cli {
             let ship = entities.get_player().unwrap();
             let res = self.gm.jump_check(ship, &target_pos);
             self.print_ent_line(ent_id, entities);
-            println!("Jump Check complete.");
+            self.suc("Jump Check complete.");
             println!("Distance: {} ly", res.distance);
             println!("Fuel needed: {}g", res.fuel_needed);
             println!("Current fuel: {}g", res.fuel_cur);
             println!("Fuel after jump: {}g", res.fuel_after);
             if res.can_jump {
-                println!("Jump is possible.");
+                self.suc("Jump is possible.");
             } else {
-                println!("Jump is NOT possible.");
+                self.err("Jump is NOT possible.");
             }
 
             self.set_last_id(ent_id);
@@ -1337,20 +1376,20 @@ mod cli {
         pub fn jump_man(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
             CLI::cli_header("Jump (Manual)");
             if cmd.len() < 2 {
-                println!("Usage: jump_man <x> <y>");
+                self.err("Usage: jump_man <x> <y>");
                 return;
             }
             let x: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid x coordinate.");
+                    self.err("Invalid x coordinate.");
                     return;
                 }
             };
             let y: i32 = match cmd[2].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid y coordinate.");
+                    self.err("Invalid y coordinate.");
                     return;
                 }
             };
@@ -1361,20 +1400,20 @@ mod cli {
         pub fn jump_check_man(&self, cmd: Vec<&str>, entities: &EntityList) {
             CLI::cli_header("Jump Check (Manual)");
             if cmd.len() < 3 {
-                println!("Usage: jump_check <x> <y>");
+                self.err("Usage: jump_check <x> <y>");
                 return;
             }
             let x: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid x coordinate.");
+                    self.err("Invalid x coordinate.");
                     return;
                 }
             };
             let y: i32 = match cmd[2].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid y coordinate.");
+                    self.err("Invalid y coordinate.");
                     return;
                 }
             };
@@ -1386,20 +1425,20 @@ mod cli {
         pub fn jump_rel(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
             CLI::cli_header("Jump (Relative)");
             if cmd.len() < 3 {
-                println!("Usage: jump_rel <dx> <dy>");
+                self.err("Usage: jump_rel <dx> <dy>");
                 return;
             }
             let dx: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid x delta.");
+                    self.err("Invalid x delta.");
                     return;
                 }
             };
             let dy: i32 = match cmd[2].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid y delta.");
+                    self.err("Invalid y delta.");
                     return;
                 }
             };
@@ -1411,20 +1450,20 @@ mod cli {
         pub fn jump_check_rel(&self, cmd: Vec<&str>, entities: &EntityList) {
             CLI::cli_header("Jump Check (Relative)");
             if cmd.len() < 3 {
-                println!("Usage: jump_check_rel <dx> <dy>");
+                self.err("Usage: jump_check_rel <dx> <dy>");
                 return;
             }
             let dx: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid x delta.");
+                    self.err("Invalid x delta.");
                     return;
                 }
             };
             let dy: i32 = match cmd[2].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid y delta.");
+                    self.err("Invalid y delta.");
                     return;
                 }
             };
@@ -1444,14 +1483,14 @@ mod cli {
                 let ent_id: i32 = match cmd[1].parse() {
                     Ok(num) => num,
                     Err(_) => {
-                        println!("Invalid entity ID.");
+                        self.err("Invalid entity ID.");
                         return;
                     }
                 };
                 if let Some(_ent) = entities.get_by_id(ent_id) {
                     ent = _ent;
                 } else {
-                    println!("No entity found with ID {}.", ent_id);
+                    self.err(format!("No entity found with ID {}.", ent_id).as_str());
                 }
             }
 
@@ -1486,27 +1525,27 @@ mod cli {
         pub fn buy(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
             CLI::cli_header("Buy Items");
             if cmd.len() < 4 {
-                println!("Usage: buy <ent_id> <item> <qty>");
+                self.err("Usage: buy <ent_id> <item> <qty>");
                 return;
             }
             let ent_id: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid entity ID.");
+                    self.err("Invalid entity ID.");
                     return;
                 }
             };
             let item = match ILM.get_by_sname(cmd[2]) {
                 Some(it) => it,
                 None => {
-                    println!("Invalid item sname: '{}'", cmd[2]);
+                    self.err(format!("Invalid item sname: '{}'", cmd[2]).as_str());
                     return;
                 }
             };
             let qty: i32 = match cmd[3].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid quantity.");
+                    self.err("Invalid quantity.");
                     return;
                 }
             };
@@ -1514,16 +1553,25 @@ mod cli {
             let player = entities.get_player().unwrap();
             let seller = entities.get(ent_id).unwrap();
             let res = self.gm.buy(entities, player.id, seller.id, item, qty);
-            if res.success {
-                println!("Purchase successful.");
-                println!(
-                    "Bought {} of {} from {}.",
-                    fmt::peice(&qty),
-                    item.fname,
-                    seller.name
-                );
-            } else {
-                println!("{}", res.message);
+            match res.status {
+                GMRS::Success => {
+                    self.suc("Purchase successful.");
+                    println!(
+                        "Bought {} of {} from {}.",
+                        fmt::peice(&qty),
+                        item.fname,
+                        seller.name
+                    );
+                }
+                GMRS::TooFar => {
+                    self.err("Too far to trade");
+                }
+                GMRS::NotDocked => {
+                    self.err("Must be docked to trade with stations.");
+                }
+                _ => {
+                    self.err(format!("{}", res.message).as_str());
+                }
             }
         }
 
@@ -1540,7 +1588,7 @@ mod cli {
                 max_distance = match cmd[1].parse() {
                     Ok(num) => num,
                     Err(_) => {
-                        println!("Invalid max distance.");
+                        self.err("Invalid max distance.");
                         return;
                     }
                 };
@@ -1575,7 +1623,7 @@ mod cli {
             println!("Nearby docking-capable entities:");
             let res = self.gm.dock_list(entities.get_player().unwrap(), &entities);
             if res.entities.is_empty() {
-                println!("No docking-capable entities nearby.");
+                self.err("No docking-capable entities nearby.");
             } else {
                 for ent in res.entities {
                     let distance = entities.get_player().unwrap().pos.distance(&ent.pos);
@@ -1587,13 +1635,13 @@ mod cli {
         pub fn dock(&mut self, cmd: Vec<&str>, entities: &mut EntityList) {
             CLI::cli_header("Docking");
             if cmd.len() < 2 {
-                println!("Usage: dock <entity_id>");
+                self.err("Usage: dock <entity_id>");
                 return;
             }
             let ent_id: i32 = match cmd[1].parse() {
                 Ok(num) => num,
                 Err(_) => {
-                    println!("Invalid entity ID.");
+                    self.err("Invalid entity ID.");
                     return;
                 }
             };
@@ -1601,10 +1649,10 @@ mod cli {
             self.print_ent_line(ent_id, entities);
 
             let res = self.gm.dock(entities, ent_id);
-            if res.success {
-                println!("Docked to: {}", ent_id);
+            if res.status == GMRS::Success {
+                self.suc(format!("Docked to: {}", ent_id).as_str());
             } else {
-                println!("Docking failed: {}", res.message);
+                self.err(format!("Docking failed: {}", res.message).as_str());
             }
 
             self.set_last_id(ent_id);
@@ -1618,7 +1666,7 @@ mod cli {
         pub fn name(&self, cmd: Vec<&str>, entities: &mut EntityList) {
             CLI::cli_header("Rename Ship");
             if cmd.len() < 2 {
-                println!("Usage: name <new_name>");
+                self.err("Usage: name <new_name>");
                 return;
             }
             let new_name = cmd[1..].join(" ");
@@ -1636,20 +1684,23 @@ mod cli {
             let ship = entities.get_player_mut().unwrap();
             // Check if docked
             if ship.docked_id.is_none() {
-                println!("Must be docked to refuel.");
+                self.err("Must be docked to refuel.");
                 return;
             }
             let mut amt_needed = ship.jump_drive.refuel_amt();
             if amt_needed == 0 {
-                println!("Jump drive is already full.");
+                self.err("Jump drive is already full.");
                 return;
             }
             let cost_per_g = 0.2; // Example cost
             let mut total_cost = (amt_needed as f32 * cost_per_g) as i32;
             if ship.fin.credits < total_cost {
-                println!(
-                    "Not enough credits to refuel completely. Need {}, have {}.",
-                    total_cost, ship.fin.credits
+                self.err(
+                    format!(
+                        "Not enough credits to refuel completely. Need {}, have {}.",
+                        total_cost, ship.fin.credits
+                    )
+                    .as_str(),
                 );
                 amt_needed = (ship.fin.credits as f32 / cost_per_g) as i32;
                 println!("You can only afford to refuel {} g.", amt_needed);
@@ -1657,11 +1708,14 @@ mod cli {
             }
             ship.fin.credits -= total_cost;
             ship.jump_drive.refuel(amt_needed);
-            println!(
-                "Refueled {} g for {} credits. Current fuel: {}",
-                amt_needed,
-                total_cost,
-                ship.jump_drive.fuel_str()
+            self.err(
+                format!(
+                    "Refueled {} g for {} credits. Current fuel: {}",
+                    amt_needed,
+                    total_cost,
+                    ship.jump_drive.fuel_str()
+                )
+                .as_str(),
             );
         }
 
@@ -1673,6 +1727,7 @@ mod cli {
                 cmd[1]
             };
             self.gm.save(&entities, filename);
+            self.suc("Saved!");
             println!("Game saved to {}", filename);
         }
 
@@ -1684,30 +1739,31 @@ mod cli {
                 cmd[1]
             };
             self.gm.load(entities, filename);
+            self.suc("Loaded!");
             println!("Loaded game from {}", filename);
         }
 
         pub fn quit(&self, cmd: Vec<&str>) {
             CLI::cli_header("Goodbye");
-            println!("Exiting...");
+            self.err("Exiting...");
         }
 
         pub fn unknown(&self, cmd: Vec<&str>) {
             CLI::cli_header("Unknown Command");
-            println!("Unknown command: {}", cmd[0]);
+            self.err(format!("Unknown command: {}", cmd[0]).as_str());
         }
 
         fn _jump(&mut self, ent: &mut Entity, target: &Position) {
             println!("Attempting jump to {}", target);
             let res = self.gm.jump(ent, target);
             if res.success {
-                println!("Jump successful.");
+                self.suc("Jump successful");
                 println!("Distance traveled: {} ly", res.distance);
                 println!("Fuel used: {} g", res.fuel_used);
                 println!("Current Fuel: {}", ent.jump_drive.fuel_str());
                 println!("New Position: {}", ent.pos);
             } else {
-                println!("Jump failed: {}", res.message);
+                self.err(format!("Jump failed: {}", res.message).as_str());
             }
         }
         fn cli_header(title: &str) {
